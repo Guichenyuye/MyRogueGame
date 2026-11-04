@@ -54,6 +54,18 @@ public class BattleTest {
         check028();
 
         System.out.println();
+        System.out.println("================ 九、0.3.0 经济/召唤物/墓渊 ================");
+        check030();
+
+        System.out.println();
+        System.out.println("================ 十、0.3.1 毒叠加/多章节/骑士长 ================");
+        check031();
+
+        System.out.println();
+        System.out.println("================ 十一、0.3.2 路线规划/敌人状态/精英奖励 ================");
+        check032();
+
+        System.out.println();
         System.out.printf("自检结果：通过 %d 项，失败 %d 项%n", passed, failed);
         if (failed > 0) {
             System.out.println("[NG] 有数值和设计文档对不上，先别往下做。");
@@ -282,7 +294,10 @@ public class BattleTest {
                     event++;
                 }
                 if (n.type == MapNode.Type.SHOP) {
-                    problems.add("第 " + floor + " 层出现本版不该生成的 " + n.type);
+                    // 0.3.0 商店：不出现在第 1/8 层
+                    if (floor <= 1 || floor >= GameMap.FLOORS) {
+                        problems.add("第 " + floor + " 层出现商店（应只在 2~7 层）");
+                    }
                 }
             }
 
@@ -862,14 +877,15 @@ public class BattleTest {
         }
         checkTrue("连续 2 次开天赋后，宝箱必定不给天赋", sawTalentForbidden);
 
-        // 单次宝箱至少给一种奖励（天赋/技能/生命三者之一，玩家 HP 或属性或天赋有变化）
+        // 单次宝箱至少给一种奖励（天赋/技能/生命/特殊奖励其一，玩家 HP 或属性或天赋或 critLocked 有变化）
         RunState box2 = new RunState(2026L);
         int hpBeforeBox = box2.player.hp;
         int talentsBeforeBox = box2.player.talents.size();
         box2.resolveTreasure();
-        checkTrue("宝箱给了一种奖励（生命/天赋/技能其一有变化）",
+        checkTrue("宝箱给了一种奖励（生命/天赋/技能/特殊其一有变化）",
                 box2.player.hp > hpBeforeBox
                         || box2.player.talents.size() > talentsBeforeBox
+                        || box2.player.critLocked
                         || hasAnySkillUpgraded(box2));
 
         System.out.println("· 0.2.2 篝火二选一");
@@ -1386,16 +1402,381 @@ public class BattleTest {
 
         System.out.println("· 事件整局只遇一次");
         RunState eventRun = new RunState(2026L);
-        // 连续抽 4 次，应该抽到 4 个不同的事件
+        // 连续抽 Event.ALL.length 次，应该抽到全部不同的事件（0.3.0 起 6 个事件）
         java.util.Set<String> seen = new java.util.HashSet<>();
-        for (int i = 0; i < 4; i++) {
+        for (int i = 0; i < Event.ALL.length; i++) {
             Event e = eventRun.rollEvent();
             if (e != null) {
                 seen.add(e.title);
             }
         }
-        check("抽 4 次得 4 个不同事件（去重）", 4, seen.size());
-        checkTrue("第 5 次抽取返回 null（事件已穷尽）", eventRun.rollEvent() == null);
+        check("抽 N 次得 N 个不同事件（去重）", Event.ALL.length, seen.size());
+        checkTrue("再抽一次返回 null（事件已穷尽）", eventRun.rollEvent() == null);
+    }
+
+    // ==================== 九、0.3.0 经济/召唤物/墓渊 ====================
+
+    private static void check030() {
+        System.out.println("· 墓渊：面板 / 技能 / 召唤物");
+        Player muyuan = new Player(CharacterType.MUYUAN);
+        check("墓渊生命 60", 60, muyuan.maxHp);
+        check("墓渊力量 2", 2, muyuan.strength);
+        check("墓渊精准 5", 5, muyuan.precision);
+        check("墓渊防御 2", 2, muyuan.defense);
+        checkTrue("墓渊初始带「亡灵项链」天赋", muyuan.hasTalent(Talent.Id.NECKLACE_OF_UNDEAD));
+        checkTrue("墓渊名字 = 墓渊", "墓渊".equals(muyuan.name));
+
+        System.out.println("· 墓渊技能原始伤害");
+        check("瞬身突刺 = 力1.5+准1.2 = 9", 9, BattleSystem.rawFlashThrust(muyuan));
+        check("死之旋风 = 力x2 = 4", 4, BattleSystem.rawDeathWhirl(muyuan));
+        check("死亡激荡 = 5+准1.5 = 12", 12, BattleSystem.rawDeathSurge(muyuan));
+
+        System.out.println("· 召唤物底层");
+        Minion zombie = new Minion(Minion.Kind.ZOMBIE, "普通僵尸", 20);
+        check("僵尸血量 20", 20, zombie.maxHp);
+        checkTrue("僵尸存活", zombie.isAlive());
+
+        System.out.println("· 道具系统");
+        check("道具总数 7", 7, Item.ALL.length);
+        checkTrue("百变药水池不含百变本身", Item.of(Item.Id.MYSTERY_POTION) != null);
+        // 百变药水池不含 MYSTERY_POTION
+        boolean mysteryInPool = false;
+        for (Item it : Item.MYSTERY_POOL) {
+            if (it.id == Item.Id.MYSTERY_POTION) {
+                mysteryInPool = true;
+            }
+        }
+        checkTrue("百变药水不在百变池里", !mysteryInPool);
+
+        System.out.println("· 道具使用（战斗内）");
+        Player itemPlayer = new Player(CharacterType.MUYUAN);
+        itemPlayer.critRate = 0;
+        BattleSystem itemBattle = new BattleSystem(itemPlayer, new Random(1));
+        itemBattle.addEnemy(new Slime());
+        itemBattle.start();
+        itemPlayer.items.add(Item.HEAL_POTION);
+        itemPlayer.hp = 30;
+        int hpBeforeItem = itemPlayer.hp;
+        itemBattle.useItem(0);   // 瞬间治疗药水，回 10 血
+        check("瞬间治疗药水回 10 血", hpBeforeItem + 10, itemPlayer.hp);
+        check("使用后道具消失", 0, itemPlayer.items.size());
+
+        System.out.println("· 墓渊召唤物技能");
+        Player summonPlayer = new Player(CharacterType.MUYUAN);
+        BattleSystem summonBattle = new BattleSystem(summonPlayer, new Random(1));
+        summonBattle.addEnemy(new Slime());
+        summonBattle.start();
+        summonPlayer.mp = 10;
+        summonBattle.useSkill(2);   // 唤起（召唤僵尸）
+        check("唤起后场上 1 个召唤物", 1, summonPlayer.minions.size());
+        check("僵尸血量 = 精准x4 = 20", 20, summonPlayer.minions.get(0).maxHp);
+
+        System.out.println("· 新敌人");
+        ScoutKnight scout = new ScoutKnight();
+        check("侦查骑士 60 血", 60, scout.maxHp);
+        Novice novice = new Novice();
+        check("新手及时 50 血", 50, novice.maxHp);
+        OldKnight old = new OldKnight();
+        check("老骑士 80 血", 80, old.maxHp);
+
+        System.out.println("· 新诅咒 / 技巧 / 天赋");
+        checkTrue("贪婪者诅咒存在", Curse.of(Curse.Id.GREEDY) != null);
+        checkTrue("长期训练是通用技巧", CombatSkill.LONG_TRAINING.owner == null);
+        checkTrue("诸武精通是宝箱限定（owner=null）", Talent.WEAPON_MASTERY.owner == null);
+        checkTrue("墓渊专属天赋亡语", Talent.DEATH_WHISPER.owner == CharacterType.MUYUAN);
+
+        System.out.println("· 新事件");
+        boolean hasMaster = false;
+        boolean hasSpring = false;
+        for (Event e : Event.ALL) {
+            if (e.title.equals("大师的教导")) hasMaster = true;
+            if (e.title.equals("露天温泉")) hasSpring = true;
+        }
+        checkTrue("大师的教导事件存在", hasMaster);
+        checkTrue("露天温泉事件存在", hasSpring);
+
+        System.out.println("· 商店节点生成");
+        // 1000 局里商店应该出现且不出现在 1/8 层
+        boolean shopAppeared = false;
+        boolean shopOnEdge = false;
+        for (int i = 0; i < 1000; i++) {
+            GameMap m = GameMap.generate(new Random(i));
+            for (int f = 1; f <= GameMap.FLOORS; f++) {
+                for (MapNode n : m.nodesOn(f)) {
+                    if (n.type == MapNode.Type.SHOP) {
+                        shopAppeared = true;
+                        if (f == 1 || f == GameMap.FLOORS) {
+                            shopOnEdge = true;
+                        }
+                    }
+                }
+            }
+        }
+        checkTrue("商店节点会生成", shopAppeared);
+        checkTrue("商店不出现在第 1/8 层", !shopOnEdge);
+    }
+
+    private static void check031() {
+        System.out.println("· 中毒层数叠加");
+        // 连续两次施加 3 层毒，目标身上中毒必须累加到 6 层
+        Player poisonPlayer = new Player(CharacterType.MUYUAN);
+        BattleSystem poisonBattle = new BattleSystem(poisonPlayer, new Random(1));
+        Enemy poisonTarget = new Slime();
+        poisonBattle.addEnemy(poisonTarget);
+        poisonBattle.start();
+        poisonBattle.applyPoisonToEnemy(poisonTarget, 3);
+        poisonBattle.applyPoisonToEnemy(poisonTarget, 3);
+        check("连续两次上 3 层毒 -> 6 层", 6,
+                StatusEffect.stacksOf(poisonTarget.statusEffects, StatusEffect.Id.POISON));
+
+        System.out.println("· 老毒物技巧（中毒额外 +1 层）");
+        Player poisonerPlayer = new Player(CharacterType.MUYUAN);
+        poisonerPlayer.combatSkills.add(CombatSkill.OLD_POISONER);
+        BattleSystem poisonerBattle = new BattleSystem(poisonerPlayer, new Random(1));
+        Enemy poisonerTarget = new Slime();
+        poisonerBattle.addEnemy(poisonerTarget);
+        poisonerBattle.start();
+        poisonerBattle.applyPoisonToEnemy(poisonerTarget, 3);
+        check("老毒物：施加 3 层毒 -> 4 层", 4,
+                StatusEffect.stacksOf(poisonerTarget.statusEffects, StatusEffect.Id.POISON));
+
+        System.out.println("· 南边领地敌人池只出骑士系");
+        boolean southernPure = true;
+        for (int i = 0; i < 2000; i++) {
+            Random r = new Random(i);
+            for (int floor = 1; floor <= 7; floor++) {
+                for (Enemy e : EnemyPool.create(MapNode.Type.BATTLE, floor, r, Chapter.SOUTHERN_LAND)) {
+                    if (!isKnight(e)) {
+                        southernPure = false;
+                    }
+                }
+                for (Enemy e : EnemyPool.create(MapNode.Type.ELITE, floor, r, Chapter.SOUTHERN_LAND)) {
+                    if (!isKnight(e)) {
+                        southernPure = false;
+                    }
+                }
+            }
+        }
+        checkTrue("南边领地战斗/精英只出骑士系（不出史莱姆/骸骨）", southernPure);
+        checkTrue("南边领地首领是年轻的骑士长",
+                EnemyPool.create(MapNode.Type.BOSS, 8, new Random(1), Chapter.SOUTHERN_LAND).get(0)
+                        instanceof YoungKnightCaptain);
+
+        System.out.println("· 年轻的骑士长：骑士礼仪（首回合真实伤害）");
+        Player captainPlayer = new Player(CharacterType.GUICHEN);
+        captainPlayer.setShield(10, 1);   // 挂护盾，验证真实伤害无视护盾
+        BattleSystem captainBattle = new BattleSystem(captainPlayer, new Random(1));
+        YoungKnightCaptain captain = new YoungKnightCaptain();
+        captainBattle.addEnemy(captain);
+        captainBattle.start();
+        int hpBefore = captainPlayer.hp;
+        captain.doTurn(captainPlayer, captainBattle);   // 第 1 回合：骑士礼仪
+        check("骑士礼仪扣玩家 10 点真实伤害（无视护盾）", hpBefore - 10, captainPlayer.hp);
+        check("骑士礼仪也扣骑士长 10 点血（120 -> 110）", 110, captain.hp);
+        check("骑士礼仪不消耗护盾（护盾仍 10）", 10, captainPlayer.shield);
+
+        System.out.println("· 圣水洗礼：后续伤害 +20%");
+        // 骑士长第一回合礼仪，之后按序列走到圣水洗礼（step=6 时）
+        // 序列：突刺(1) 神圣一击(2) 祈祷(3) 瞬息连刺(4) 圣洁之心(5) 突刺(1) 圣水洗礼(6)
+        Player baptismPlayer = new Player(CharacterType.GUICHEN);
+        BattleSystem baptismBattle = new BattleSystem(baptismPlayer, new Random(1));
+        YoungKnightCaptain baptismCaptain = new YoungKnightCaptain();
+        baptismBattle.addEnemy(baptismCaptain);
+        baptismBattle.start();
+        baptismCaptain.doTurn(baptismPlayer, baptismBattle);   // 礼仪
+        for (int i = 0; i < 7; i++) {   // 突刺、神圣一击、祈祷、瞬息连刺、圣洁之心、突刺、圣水洗礼
+            baptismCaptain.doTurn(baptismPlayer, baptismBattle);
+        }
+        check("走到圣水洗礼时附魔层数 = 1", 1, baptismCaptain.enchantStacks());
+        // 圣水洗礼本身在 step 6，此时已 +1 层（x1.2）。下一次骑士突刺应造成 10*1.2=12（忽略防御/免伤，用纯 raw 对比）
+        // 直接验证 damageMult：附魔 1 层时突刺意图显示 12 伤害
+        checkTrue("附魔 1 层后骑士突刺意图伤害 = 12", baptismCaptain.getIntent().contains("12"));
+
+        System.out.println("· 召唤物 UI 数据（血条显示依据）");
+        Minion uiZombie = new Minion(Minion.Kind.ZOMBIE, "普通僵尸", 20);
+        checkTrue("召唤物有名字", "普通僵尸".equals(uiZombie.name));
+        check("召唤物有血量上限 20", 20, uiZombie.maxHp);
+        check("召唤物当前血量可读（20）", 20, uiZombie.hp);
+
+        System.out.println("· 骑士系敌人护盾真正生效");
+        RoyalGuard guard = new RoyalGuard();
+        guard.shield = 15;
+        int hpDamage = guard.absorbByShield(7);   // 7 点伤害，护盾 15 全挡
+        check("护盾 15 吸收 7 点 -> 仍需扣血 0", 0, hpDamage);
+        check("护盾剩余 8", 8, guard.shield);
+        int hpDamage2 = guard.absorbByShield(20);   // 20 点伤害，护盾 8 挡 8，剩 12 扣血
+        check("护盾 8 吸收 20 点 -> 仍需扣血 12", 12, hpDamage2);
+        check("护盾清空为 0", 0, guard.shield);
+    }
+
+    /** 骑士系敌人判定：见习骑士 / 冲锋骑士 / 皇家守卫 / 年轻的骑士长 */
+    private static boolean isKnight(Enemy e) {
+        return e instanceof SquireKnight
+                || e instanceof ChargingKnight
+                || e instanceof RoyalGuard
+                || e instanceof YoungKnightCaptain;
+    }
+
+    private static void check032() {
+        System.out.println("· 路线规划：连线生成无死胡同、任意路径通到第 8 层");
+        boolean allReachable = true;
+        int deadEndCount = 0;
+        for (int seed = 0; seed < 2000; seed++) {
+            GameMap m = GameMap.generate(new Random(seed));
+            // 1. 每个中间层节点（1~7 层）都必须有至少一个后继（无死胡同）
+            for (int f = 1; f < GameMap.FLOORS; f++) {
+                for (MapNode n : m.nodesOn(f)) {
+                    if (n.connections.isEmpty()) {
+                        deadEndCount++;
+                        allReachable = false;
+                    }
+                }
+            }
+            // 2. 每个中间层节点（2~7 层）都必须有至少一个前驱（不孤立）
+            for (int f = 2; f < GameMap.FLOORS; f++) {
+                for (MapNode n : m.nodesOn(f)) {
+                    boolean hasPredecessor = false;
+                    for (MapNode up : m.nodesOn(f - 1)) {
+                        if (up.connections.contains(n)) {
+                            hasPredecessor = true;
+                            break;
+                        }
+                    }
+                    if (!hasPredecessor) {
+                        allReachable = false;
+                    }
+                }
+            }
+            // 3. 从第 1 层出发，BFS 能通到第 8 层 Boss
+            if (!canReachBoss(m)) {
+                allReachable = false;
+            }
+        }
+        checkTrue("2000 张地图：中间层节点无死胡同", deadEndCount == 0);
+        checkTrue("2000 张地图：每个中间层节点都有前驱", allReachable);
+
+        System.out.println("· 第 1 层唯一入口，玩家只能沿连线走");
+        GameMap m1 = GameMap.generate(new Random(42));
+        RunState run = new RunState(42, CharacterType.GUICHEN);
+        // 0.3.2 修复：开局 currentNode 为 null，options() 退回返回第 1 层节点，
+        // 玩家必须先进入第 1 层战斗，而不是直接跳到第 2 层。
+        checkTrue("开局当前节点为 null（尚未停留）", run.currentNode == null);
+        MapNode start = run.options().get(0);
+        checkTrue("开局可选项是第 1 层节点", start.floor == 1);
+        checkTrue("第 1 层节点有后继连线", !start.connections.isEmpty());
+        // 选中第 1 层节点，走完，验证 currentNode 更新、options 变成新节点的连线
+        MapNode first = run.choose(0);
+        checkTrue("选中了第 1 层入口节点", first != null);
+        run.advance();
+        checkTrue("推进后当前节点更新为刚访问的节点", run.currentNode == first);
+        checkTrue("下一层可选项 = 新节点的连线", run.options().equals(first.connections));
+
+        System.out.println("· 墓渊精英奖励：技能池补全后方支援/死亡激荡");
+        RunState muyuanRun = new RunState(7, CharacterType.MUYUAN);
+        // 墓渊槽 2/3 是唤起/死之旋风，可替换；rollUnownedReplSkill 应能抽到墓渊专属技能
+        Skill repl = muyuanRun.rollUnownedReplSkill();
+        checkTrue("墓渊精英战能抽到专属替换技能（后方支援/死亡激荡）", repl != null);
+        if (repl != null) {
+            checkTrue("抽到的技能属于墓渊", repl.owner == CharacterType.MUYUAN);
+        }
+        // 精英奖励：天赋 + 技能至少有一项（墓渊初始有亡灵项链天赋，技能池也非空）
+        RunState.EliteReward reward = muyuanRun.rollEliteReward();
+        checkTrue("墓渊精英奖励非空（天赋或技能）", reward != null);
+        if (reward != null) {
+            checkTrue("墓渊精英奖励技能侧非空", reward.skill != null);
+        }
+
+        System.out.println("· 0.3.2 遗留修复：宝箱怪标记清除 / 毒死判胜 / 第1层扇出完整");
+        // 问题五：宝箱怪标记在战斗胜利后必须清除，否则下一场普通战斗误出宝箱怪
+        RunState mimicRun = new RunState(9, CharacterType.GUICHEN);
+        mimicRun.pending = mimicRun.map.nodesOn(1).get(0);
+        mimicRun.treasureMimic = true;   // 模拟宝箱怪已触发
+        mimicRun.onBattleWin();
+        checkTrue("宝箱怪战斗胜利后标记被清除", !mimicRun.treasureMimic);
+
+        // 问题一：敌人在敌方回合被毒死，enemyTurn 必须立即判胜，不能卡在 PLAYER_TURN
+        Player poisonPlayer = new Player(CharacterType.GUICHEN);
+        BattleSystem poisonBattle = new BattleSystem(poisonPlayer, new Random(3));
+        Slime weakSlime = new Slime("残血史莱姆", 4, 0, 0);   // 4 血，5 层毒一回合毒死
+        poisonBattle.addEnemy(weakSlime);
+        poisonBattle.start();
+        // 用剧毒药水挂 5 层毒（不即时扣血），再用防御技能（槽 1，不造成伤害）触发敌方回合，
+        // 敌方回合开始毒发扣 5 点 > 4 血，敌死，enemyTurn 应立即判 VICTORY。
+        poisonPlayer.items.add(Item.POISON_POTION);
+        poisonBattle.useItem(0);
+        poisonBattle.useSkill(1);   // 防御，触发 enemyTurn -> 毒发致死
+        checkTrue("毒发致死敌人后 state 判为 VICTORY",
+                poisonBattle.getState() == BattleSystem.State.VICTORY);
+
+        // 问题二：第 1 层（唯一节点）必须扇出到第 2 层所有节点，不能有孤立节点
+        for (int seed = 0; seed < 500; seed++) {
+            GameMap m = GameMap.generate(new Random(seed));
+            List<MapNode> firstRow = m.nodesOn(1);
+            List<MapNode> secondRow = m.nodesOn(2);
+            for (MapNode s : secondRow) {
+                if (!firstRow.get(0).connections.contains(s)) {
+                    checkTrue("第 1 层扇出覆盖第 2 层所有节点（seed=" + seed + "）", false);
+                }
+            }
+        }
+        checkTrue("500 张地图：第 1 层扇出覆盖第 2 层全部节点", true);
+
+        System.out.println("· 空战斗拦截：敌人列表为空时兜底塞史莱姆，绝不空怪胜利");
+        // 场景 1：pending 为 null（异常状态），createEnemies 必须兜底返回非空
+        RunState nullPending = new RunState(1234, CharacterType.GUICHEN);
+        nullPending.pending = null;
+        List<Enemy> nullEnemies = nullPending.createEnemies();
+        checkTrue("pending=null 时 createEnemies 兜底返回非空", !nullEnemies.isEmpty());
+        // 场景 2：正常战斗节点，敌人列表必然非空（且不含空列表）
+        for (int seed = 0; seed < 200; seed++) {
+            RunState r = new RunState(seed, CharacterType.GUICHEN);
+            r.pending = r.map.nodesOn(1).get(0);
+            List<Enemy> es = r.createEnemies();
+            if (es.isEmpty()) {
+                checkTrue("普通战斗节点敌人列表非空（seed=" + seed + "）", false);
+            }
+        }
+        checkTrue("200 张地图：普通战斗节点敌人列表非空", true);
+
+        System.out.println("· 连续闯 3 个节点：层数必须严格递增，无死循环");
+        // 模拟「第 1 层战斗 -> 第 2 层某节点 -> 第 3 层某节点」连续推进，
+        // 每一步 floor 都要 +1，且 pending 被清空、currentNode 正确更新。
+        RunState seq = new RunState(2026, CharacterType.GUICHEN);
+        int expectedFloor = 1;
+        for (int step = 1; step <= 3; step++) {
+            check("第 " + step + " 步开始时在第 " + expectedFloor + " 层", expectedFloor, seq.floor);
+            MapNode node = seq.pending != null ? seq.pending : seq.choose(0);
+            checkTrue("第 " + step + " 步选到了节点", node != null);
+            seq.onBattleWin();   // 战斗胜利（战斗节点直接结算推进）
+            // onBattleWin 会把 floor +1 并清空 pending（首领除外）
+            if (seq.cleared) {
+                break;
+            }
+            checkTrue("第 " + step + " 步结算后 pending 已清空", seq.pending == null);
+            expectedFloor++;
+            check("第 " + step + " 步结算后推进到第 " + expectedFloor + " 层", expectedFloor, seq.floor);
+        }
+    }
+
+    /** 从第 1 层 BFS，判断能否到达第 8 层 Boss（任一节点） */
+    private static boolean canReachBoss(GameMap m) {
+        java.util.Set<MapNode> seen = new java.util.HashSet<>();
+        java.util.Deque<MapNode> queue = new java.util.ArrayDeque<>();
+        MapNode start = m.nodesOn(1).get(0);
+        queue.add(start);
+        seen.add(start);
+        while (!queue.isEmpty()) {
+            MapNode cur = queue.poll();
+            if (cur.floor == GameMap.FLOORS) {
+                return true;   // 到达第 8 层 Boss
+            }
+            for (MapNode next : cur.connections) {
+                if (seen.add(next)) {
+                    queue.add(next);
+                }
+            }
+        }
+        return false;
     }
 
     // ==================== 断言工具 ====================

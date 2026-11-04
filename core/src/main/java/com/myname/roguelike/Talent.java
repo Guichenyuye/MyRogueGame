@@ -34,7 +34,21 @@ public class Talent {
         /** 倒映：自身获得非晕眩负面效果时，给最前方敌人附加同样负面效果（0.2.8 空梦专属） */
         REFLECTION,
         /** 天佑：暴击率 +10%（0.2.8 降临者专属） */
-        HEAVENLY_BLESSING
+        HEAVENLY_BLESSING,
+        // ---- 0.3.0 墓渊专属 ----
+        /** 亡灵项链：战斗结束时场上每个召唤物给自身 2 点生命，满血则提升生命上限 2 点（初始天赋） */
+        NECKLACE_OF_UNDEAD,
+        /** 亡语：召唤物死亡时，对全体敌人造成其最大生命 20% 伤害 */
+        DEATH_WHISPER,
+        /** 死气勃勃：场上任意单位死亡，墓渊回 2 血（不超上限） */
+        THRIVING_DEATH,
+        /** 亡者气质：每场战斗第一次受到超过 15 的伤害减半 */
+        DEAD_AURA,
+        /** 替死鬼：伤害转移给召唤物；无召唤物时自身受击 +10%、造伤 +10% */
+        SCAPEGOAT,
+        // ---- 0.3.0 宝箱限定 ----
+        /** 诸武精通：所有伤害（含召唤物）x1.2（宝箱限定，低概率） */
+        WEAPON_MASTERY
     }
 
     public final Id id;
@@ -98,14 +112,45 @@ public class Talent {
     public static final Talent HEAVENLY_BLESSING = new Talent(
             Id.HEAVENLY_BLESSING, "天佑", "暴击率 +10%", CharacterType.DESCENDER);
 
+    // ================= 0.3.0 墓渊专属天赋 ==================
+
+    /** 亡灵项链：战斗结束时场上每个召唤物给自身 2 点生命，满血则提升生命上限 2 点（初始天赋） */
+    public static final Talent NECKLACE_OF_UNDEAD = new Talent(
+            Id.NECKLACE_OF_UNDEAD, "亡灵项链", "战斗结束时每个存活召唤物给予 2 点生命，满血则提升生命上限", CharacterType.MUYUAN);
+
+    /** 亡语：召唤物死亡时，对全体敌人造成其最大生命 20% 伤害 */
+    public static final Talent DEATH_WHISPER = new Talent(
+            Id.DEATH_WHISPER, "亡语", "召唤物死亡时，对全体敌人造成其最大生命 20% 伤害", CharacterType.MUYUAN);
+
+    /** 死气勃勃：场上任意单位死亡，墓渊回 2 血（不超上限） */
+    public static final Talent THRIVING_DEATH = new Talent(
+            Id.THRIVING_DEATH, "死气勃勃", "场上任意单位死亡，恢复 2 点生命（不超上限）", CharacterType.MUYUAN);
+
+    /** 亡者气质：每场战斗第一次受到超过 15 的伤害减半 */
+    public static final Talent DEAD_AURA = new Talent(
+            Id.DEAD_AURA, "亡者气质", "每场战斗第一次受到超过 15 的伤害减半", CharacterType.MUYUAN);
+
+    /** 替死鬼：伤害转移给召唤物；无召唤物时自身受击 +10%、造伤 +10% */
+    public static final Talent SCAPEGOAT = new Talent(
+            Id.SCAPEGOAT, "替死鬼", "伤害转移给召唤物；无召唤物时受击 +10%、造伤 +10%", CharacterType.MUYUAN);
+
+    // ================= 0.3.0 宝箱限定天赋 ==================
+
+    /** 诸武精通：所有伤害（含召唤物）x1.2（宝箱限定，低概率 1%） */
+    public static final Talent WEAPON_MASTERY = new Talent(
+            Id.WEAPON_MASTERY, "诸武精通", "所有伤害（含召唤物）x1.2", null);
+
     /**
      * 全部天赋，精英节点随机抽取时从这里遍历。
      * <p>
      * 0.2.5 起天赋按角色完全专属，抽取时要先按 {@code owner} 过滤出当前角色的池子，
-     * 见 {@link RunState#rollUnownedTalent()}。
+     * 见 {@link RunState#rollUnownedTalent()}。诸武精通（owner=null）是宝箱限定，
+     * 不进入精英 / 宝箱的常规抽取池，由 {@code RunState#resolveTreasure()} 单独按概率发放。
      */
     public static final Talent[] ALL = {
             BLOOD_TEAR, OUT_OF_CONTROL, LAZY, ARCHERY_MASTER, GENTLE, FEARLESS,
-            JOY_GIFT, MIRROR_AVATAR, DESCENDER, REFLECTION, HEAVENLY_BLESSING
+            JOY_GIFT, MIRROR_AVATAR, DESCENDER, REFLECTION, HEAVENLY_BLESSING,
+            NECKLACE_OF_UNDEAD, DEATH_WHISPER, THRIVING_DEATH, DEAD_AURA, SCAPEGOAT,
+            WEAPON_MASTERY
     };
 }

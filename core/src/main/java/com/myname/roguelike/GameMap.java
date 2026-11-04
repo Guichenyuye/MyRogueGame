@@ -30,6 +30,8 @@ public class GameMap {
     private static final int W_TREASURE = 12;
     private static final int W_ELITE = 20;
     private static final int W_EVENT = 15;
+    /** 商店权重（0.3.0 起参与生成，不出现在第 1/8 层） */
+    private static final int W_SHOP = 12;
 
     /** rows.get(i) = 第 i+1 层的所有节点 */
     private final List<List<MapNode>> rows;
@@ -55,7 +57,47 @@ public class GameMap {
         // 最后一层：首领
         rows.add(single(FLOORS, MapNode.Type.BOSS));
 
-        return new GameMap(rows);
+        GameMap map = new GameMap(rows);
+        map.connectLayers();
+        return map;
+    }
+
+    /**
+     * 逐层建立「上一层 -> 下一层」的单向连接（0.3.2 路线规划）。
+     * <p>
+     * 保证：
+     * <ul>
+     *   <li>第 1 层到第 FLOORS 层必有通路（第 1 层只有一个战斗节点，向下扇出）。</li>
+     *   <li>每个中间层节点都有至少一个后继（不出现死胡同）。</li>
+     *   <li>每个中间层节点都有至少一个前驱（不出现孤立节点，除第 1 层）。</li>
+     * </ul>
+     * 算法：上一层每个节点 i 连到下一层「按比例映射」到的节点 j（以及 j+1，若存在），
+     * 这样既保证连通，又让连线在视觉上大致相邻、不交叉成一团乱麻。
+     */
+    private void connectLayers() {
+        for (int f = 1; f < FLOORS; f++) {
+            List<MapNode> upper = rows.get(f - 1);   // 上一层
+            List<MapNode> lower = rows.get(f);        // 下一层
+            int a = upper.size();
+            int b = lower.size();
+            if (a == 1) {
+                // 上一层只有一个节点（尤其第 1 层）：扇出到下一层所有节点，
+                // 否则下一层 index 靠后的节点永远没有前驱，成为到不了的孤立死节点。
+                for (MapNode next : lower) {
+                    upper.get(0).connections.add(next);
+                }
+                continue;
+            }
+            for (int i = 0; i < a; i++) {
+                // 按比例把 i 映射到 [0, b-1]，再扇出到 j 和 j+1，
+                // 保证下一层每个节点都被至少一个上一层节点连到（无孤立节点）。
+                int j = i * (b - 1) / (a - 1);
+                upper.get(i).connections.add(lower.get(j));
+                if (j + 1 < b) {
+                    upper.get(i).connections.add(lower.get(j + 1));
+                }
+            }
+        }
     }
 
     private static List<MapNode> single(int floor, MapNode.Type type) {
@@ -77,6 +119,7 @@ public class GameMap {
         boolean hasTreasure = false;
         boolean hasElite = false;
         boolean hasEvent = false;
+        boolean hasShop = false;
 
         for (int i = 0; i < count; i++) {
             MapNode.Type chosen = null;
@@ -88,6 +131,7 @@ public class GameMap {
                 if (candidate == MapNode.Type.TREASURE && hasTreasure) continue;
                 if (candidate == MapNode.Type.ELITE && hasElite) continue;
                 if (candidate == MapNode.Type.EVENT && hasEvent) continue;
+                if (candidate == MapNode.Type.SHOP && hasShop) continue;
                 chosen = candidate;
                 break;
             }
@@ -99,6 +143,7 @@ public class GameMap {
             if (chosen == MapNode.Type.TREASURE) hasTreasure = true;
             if (chosen == MapNode.Type.ELITE) hasElite = true;
             if (chosen == MapNode.Type.EVENT) hasEvent = true;
+            if (chosen == MapNode.Type.SHOP) hasShop = true;
             picked[i] = chosen;
         }
 
@@ -127,15 +172,18 @@ public class GameMap {
         int wTreasure = floor >= 2 ? W_TREASURE : 0;
         int wElite = floor >= 4 ? W_ELITE : 0;
         int wEvent = floor >= 2 ? W_EVENT : 0;
+        // 商店不出现在第 1/8 层（第 8 层是首领，第 1 层是教学战斗）
+        int wShop = (floor >= 2 && floor <= FLOORS - 1) ? W_SHOP : 0;
 
-        int total = W_BATTLE + wRest + wTreasure + wElite + wEvent;
+        int total = W_BATTLE + wRest + wTreasure + wElite + wEvent + wShop;
         int roll = rng.nextInt(total);
 
         if ((roll -= W_BATTLE) < 0) return MapNode.Type.BATTLE;
         if ((roll -= wRest) < 0) return MapNode.Type.REST;
         if ((roll -= wTreasure) < 0) return MapNode.Type.TREASURE;
         if ((roll -= wElite) < 0) return MapNode.Type.ELITE;
-        return MapNode.Type.EVENT;
+        if ((roll -= wEvent) < 0) return MapNode.Type.EVENT;
+        return MapNode.Type.SHOP;
     }
 
     // ==================== 查询 ====================

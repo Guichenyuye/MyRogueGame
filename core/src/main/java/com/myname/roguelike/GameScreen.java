@@ -7,6 +7,7 @@ import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.g2d.BitmapFont;
 import com.badlogic.gdx.graphics.g2d.GlyphLayout;
+import com.badlogic.gdx.math.Rectangle;
 import com.badlogic.gdx.utils.Align;
 
 import java.util.List;
@@ -29,6 +30,8 @@ public class GameScreen implements Screen {
     private static final float HOTBAR_H = 96f;
     private static final float PANEL_H = 214f;
     private static final float LINE_GAP = 4f;
+    /** 顶部道具栏高度（0.3.0） */
+    private static final float ITEM_BAR_H = 44f;
 
     /** 天赋 / 技巧每行的高度（字不缩放，固定 20px 字体一行的高度即可） */
     private static final float ROW_H = 30f;
@@ -61,6 +64,9 @@ public class GameScreen implements Screen {
     private static final Color CURSE_TEXT = new Color(0.85f, 0.65f, 0.90f, 1f);
     private static final Color STATUS_TITLE = new Color(0.95f, 0.62f, 0.30f, 1f);
     private static final Color STATUS_TEXT = new Color(0.95f, 0.75f, 0.45f, 1f);
+    // 增益（绿）与减益（橙/红）两套颜色（0.3.0 效果栏区分正负）
+    private static final Color BUFF_TEXT = new Color(0.45f, 0.85f, 0.45f, 1f);
+    private static final Color DEBUFF_TEXT = new Color(0.95f, 0.45f, 0.45f, 1f);
     private static final Color GHOST = new Color(0.38f, 0.38f, 0.42f, 1f);
     private static final Color ENEMY_ACTION = new Color(0.95f, 0.45f, 0.45f, 1f);
     private static final Color WARN = new Color(0.98f, 0.62f, 0.30f, 1f);
@@ -91,6 +97,12 @@ public class GameScreen implements Screen {
 
     /** 是否弹出了「放弃本局」确认框（0.2.5：ESC 不再直接回主菜单，先确认） */
     private boolean confirmAbort = false;
+
+    /** 道具槽命中区域（0.3.0，渲染时填充，鼠标点击使用） */
+    private final Rectangle[] itemRects = new Rectangle[64];
+
+    /** 悬停详情（0.3.2）：当前鼠标悬停的条目描述，null 表示无悬停 */
+    private String hoverDesc = null;
 
     /**
      * 开打时所在的层。结算页必须用这个而不是 {@code run.floor} ——
@@ -134,7 +146,7 @@ public class GameScreen implements Screen {
         // 左右面板压到 286：日志区宽一点，一行伤害记录才放得下不换行
         float leftW = Math.min(286f, w * 0.22f);
         float rightW = Math.min(286f, w * 0.22f);
-        float panelTop = h - MARGIN;
+        float panelTop = h - MARGIN - ITEM_BAR_H;   // 顶部留出道具栏
         float hotbarY = MARGIN;
         float logX = MARGIN + leftW + 14f;
         float logW = w - logX - rightW - MARGIN - 14f;
@@ -152,15 +164,23 @@ public class GameScreen implements Screen {
         ui.rect(w - MARGIN - rightW, panelTop - PANEL_H, rightW, PANEL_H, PANEL_BG);
         ui.rect(logX, logBottom, logW, logTop - logBottom, PANEL_BG);
 
+        hoverDesc = null;   // 每帧先清空，绘制过程中命中的会重新填上
+
         drawPlayerPanel(MARGIN, panelTop, leftW, leftH);
         drawEnemyPanel(w - MARGIN - rightW, panelTop, rightW);
         drawLog(logX, logTop, logW, logBottom);
         drawHotbar(hotbarY, w);
+        drawItemBar(w, h);   // 0.3.0 顶部道具 + 金币栏
 
         if (battle.getState() != BattleSystem.State.PLAYER_TURN) {
             drawResultOverlay(w, h);
         } else if (confirmAbort) {
             drawAbortConfirm(w, h);
+        }
+
+        // 悬停浮窗画在最上层（0.3.2）
+        if (hoverDesc != null) {
+            ui.drawTooltip(hoverDesc, Gdx.input.getX(), Gdx.input.getY(), 320f);
         }
 
         ui.batch().end();
@@ -172,6 +192,7 @@ public class GameScreen implements Screen {
             return;
         }
         if (battle.getState() == BattleSystem.State.VICTORY) {
+            run.battleFled = battle.hasFled();   // 0.3.0 新手及时怯战逃跑
             run.onBattleWin();
             settled = true;
         } else if (battle.getState() == BattleSystem.State.DEFEAT) {
@@ -235,6 +256,7 @@ public class GameScreen implements Screen {
                         : Color.WHITE;
             }
             ui.text(t.name, left, y, color, 1.0f);
+            tryHover(t.name + "：" + t.desc, left, y, ui.measure(t.name, 1.0f));
             y -= ROW_H;
         }
 
@@ -247,6 +269,7 @@ public class GameScreen implements Screen {
         } else {
             for (CombatSkill skill : p.combatSkills) {
                 ui.text(skill.name, left, y, SKILL_TEXT, 1.0f);
+                tryHover(skill.name + "：" + skill.desc, left, y, ui.measure(skill.name, 1.0f));
                 y -= ROW_H;
             }
         }
@@ -257,20 +280,34 @@ public class GameScreen implements Screen {
             y -= 26;
             for (Curse c : p.curses) {
                 ui.text(c.name, left, y, CURSE_TEXT, 1.0f);
+                tryHover(c.name + "：" + c.desc, left, y, ui.measure(c.name, 1.0f));
                 y -= ROW_H;
             }
         }
 
-        // ---- 负面效果（战斗临时，橙，单字 + 层数）----
+        // ---- 效果（0.3.0 起：正面效果在前、负面效果在后，统一按优先级排序）----
         if (!p.statusEffects.isEmpty()) {
-            ui.text("—— 状态 ——", left, y, STATUS_TITLE, 1.0f);
+            ui.text("—— 效果 ——", left, y, STATUS_TITLE, 1.0f);
             y -= 26;
-            for (StatusEffect.Instance inst : p.statusEffects) {
+            for (StatusEffect.Instance inst : StatusEffect.sortedByPriority(p.statusEffects)) {
                 String label = inst.effect.shortName;
                 if (inst.stacks > 1) {
                     label += "x" + inst.stacks;
                 }
-                ui.text(label, left, y, STATUS_TEXT, 1.0f);
+                Color color = inst.effect.isBuff ? BUFF_TEXT : DEBUFF_TEXT;
+                ui.text(label, left, y, color, 1.0f);
+                tryHover(inst.effect.name + "：" + inst.effect.desc, left, y, ui.measure(label, 1.0f));
+                y -= ROW_H;
+            }
+        }
+
+        // ---- 召唤物（0.3.1：墓渊的僵尸/幽魂，显示名字 + 血量）----
+        if (!p.minions.isEmpty()) {
+            ui.text("—— 召唤物 ——", left, y, GHOST, 1.0f);
+            y -= 26;
+            for (Minion m : p.minions) {
+                ui.text(m.name + "  HP " + m.hp + "/" + m.maxHp, left, y,
+                        m.isAlive() ? BUFF_TEXT : DIM, 1.0f);
                 y -= ROW_H;
             }
         }
@@ -298,6 +335,22 @@ public class GameScreen implements Screen {
         }
     }
 
+    /**
+     * 悬停检测（0.3.2）：判断鼠标是否停留在 {@code (x, y)} 处、宽度为 {@code textWidth} 的一行文字上。
+     * 命中则把 {@link #hoverDesc} 设为完整描述。文字行高约 24px（1.0 缩放下）。
+     */
+    private void tryHover(String desc, float x, float y, float textWidth) {
+        if (hoverDesc != null || desc == null) {
+            return;   // 已命中更上层的项，或没有描述可显示
+        }
+        float mx = Gdx.input.getX();
+        float my = Gdx.graphics.getHeight() - Gdx.input.getY();
+        // 文字占 [y-24, y]，宽度 textWidth
+        if (mx >= x && mx <= x + textWidth && my <= y && my >= y - 24) {
+            hoverDesc = desc;
+        }
+    }
+
     /** 左面板需要的高度：基础信息 + 天赋 + 技巧 + 诅咒 + 负面效果 + 底部提示 */
     private float playerPanelHeight() {
         Player p = battle.getPlayer();
@@ -309,6 +362,9 @@ public class GameScreen implements Screen {
         }
         if (!p.statusEffects.isEmpty()) {
             h += 26f + p.statusEffects.size() * ROW_H;                  // 状态标题 + 每个状态一行
+        }
+        if (!p.minions.isEmpty()) {
+            h += 26f + p.minions.size() * ROW_H;                        // 召唤物标题 + 每个召唤物一行
         }
         return h + 32f + 14f;                                           // 底部提示行
     }
@@ -349,12 +405,52 @@ public class GameScreen implements Screen {
             ui.text("下回合意图", x + 14, top - 118, DIM, 1.0f);
             ui.text(enemy.isAlive() ? enemy.getIntent() : "已倒下", x + 14, top - 146,
                     enemy.isAlive() ? INTENT : DIM, 1.0f);
+
+            // 敌人当前效果（0.3.2）：意图下方，与玩家同排版（增益绿、减益红橙、带层数）
+            drawEnemyStatus(enemy, x + 14, top - 174, width - 28);
         } else {
             ui.text("HP  " + enemy.hp + " / " + enemy.maxHp + "   防御 " + enemy.defense,
                     x + 14, top - 34, HP_COLOR, 1.0f);
             ui.bar(x + 14, top - 56, width - 28, 12, (float) enemy.hp / enemy.maxHp, HP_COLOR, BAR_BG);
             ui.text(enemy.isAlive() ? enemy.getIntent() : "已倒下", x + 14, top - 76,
                     enemy.isAlive() ? INTENT : DIM, 1.0f);
+            // 紧凑布局：状态合成一行，放意图下方
+            drawEnemyStatus(enemy, x + 14, top - 96, width - 28);
+        }
+    }
+
+    /** 敌人当前效果（0.3.2）：与玩家效果栏同排版，增益绿、减益红橙、带层数，合成一行紧凑显示 */
+    private void drawEnemyStatus(Enemy enemy, float x, float y, float width) {
+        List<StatusEffect.Instance> list = StatusEffect.sortedByPriority(enemy.statusEffects);
+        if (list.isEmpty()) {
+            return;
+        }
+        // 逐段绘制：不同颜色需要分开画，不能拼成一个字符串用一种颜色
+        float cursorX = x;
+        boolean first = true;
+        for (StatusEffect.Instance inst : list) {
+            String label = inst.effect.shortName;
+            if (inst.stacks > 1) {
+                label += inst.stacks;
+            }
+            Color color = inst.effect.isBuff ? BUFF_TEXT : DEBUFF_TEXT;
+            if (!first) {
+                // 量一个空格宽度作为间隔
+                ui.text(" ", cursorX, y, Color.WHITE, 1.0f);
+                cursorX += ui.measure(" ", 1.0f);
+            }
+            ui.text(label, cursorX, y, color, 1.0f);
+            cursorX += ui.measure(label, 1.0f);
+            first = false;
+        }
+        // 悬停详情：整行效果区，显示所有效果的完整描述
+        if (hoverDesc == null) {
+            StringBuilder desc = new StringBuilder();
+            for (StatusEffect.Instance inst : list) {
+                desc.append(inst.effect.name).append(" x").append(inst.stacks).append("：")
+                        .append(inst.effect.desc).append('\n');
+            }
+            tryHover(desc.toString().trim(), x, y, cursorX - x);
         }
     }
 
@@ -453,6 +549,8 @@ public class GameScreen implements Screen {
 
             ui.text("[" + (i + 1) + "] " + skill.name, x + 12, y + HOTBAR_H - 6,
                     usable ? Color.WHITE : DIM, 1.0f);
+            tryHover(skill.name + "：" + skill.desc, x + 12, y + HOTBAR_H - 6,
+                    ui.measure("[" + (i + 1) + "] " + skill.name, 1.0f));
 
             String cost = skill.mpCost == 0 ? "不耗精力" : (skill.mpCost + " 精力");
             if (skill.cd > 0) {
@@ -484,6 +582,49 @@ public class GameScreen implements Screen {
     }
 
     /**
+     * 顶部道具栏（0.3.0）：左侧道具槽（横排），右侧金币。
+     * 鼠标点击道具使用（不耗精力、不耗行动次数）。
+     * 0.3.2 修复：「道具」标题单独占空间放最左，道具框紧随其后，不再重叠；悬停显示完整详情。
+     */
+    private void drawItemBar(float w, float h) {
+        float barY = h - ITEM_BAR_H;
+        Player p = battle.getPlayer();
+
+        ui.rect(0, barY, w, ITEM_BAR_H, PANEL_BG);
+        ui.frame(0, barY, w, ITEM_BAR_H, new Color(0.30f, 0.34f, 0.42f, 1f));
+
+        // 左侧「道具」标题：单独占空间，紧贴左边缘，与道具框水平对齐、不重叠
+        float itemSize = 40f;
+        float itemY = barY + 2f;
+        ui.text("道具", 14f, itemY + itemSize - 6, DIM, 0.9f);
+
+        // 道具框从标题右侧开始横排
+        float titleW = ui.measure("道具", 0.9f);
+        float itemX = 14f + titleW + 12f;
+        java.util.List<Item> items = p.items;
+        for (int i = 0; i < items.size() && i < itemRects.length; i++) {
+            Item item = items.get(i);
+            float x = itemX + i * (itemSize + 6f);
+            itemRects[i] = new Rectangle(x, itemY, itemSize, itemSize);
+            ui.rect(x, itemY, itemSize, itemSize, PANEL_BG);
+            ui.frame(x, itemY, itemSize, itemSize, new Color(0.55f, 0.70f, 0.92f, 1f));
+            // 显示道具首字（名字第一个字）
+            String firstChar = item.name.substring(0, 1);
+            ui.textCentered(firstChar, x + itemSize / 2f, itemY + itemSize - 6, Color.WHITE, 1.0f);
+            // 悬停详情：完整名字 + 描述
+            tryHover(item.name + "：" + item.desc, x, itemY + itemSize, itemSize);
+        }
+        // 清空后面的命中区域
+        for (int i = items.size(); i < itemRects.length; i++) {
+            itemRects[i] = null;
+        }
+
+        // 右侧：金币
+        String goldText = "金币 " + p.gold;
+        ui.text(goldText, w - 14f - ui.measure(goldText, 1.1f), barY + ITEM_BAR_H - 8, GOLD_BRIGHT, 1.1f);
+    }
+
+    /**
      * 结算页：整屏不透明覆盖。
      * 半透明会让下面的日志透出来，和结算字糊成一片（之前踩过）。
      */
@@ -505,7 +646,9 @@ public class GameScreen implements Screen {
         String hint;
         if (win) {
             title = run.cleared ? "CLEARED" : "VICTORY";
-            subtitle = run.cleared ? "腐化史莱姆王倒下了" : "敌人被击倒";
+            subtitle = run.cleared
+                    ? (run.currentChapter == Chapter.SOUTHERN_LAND ? "年轻的骑士长倒下了" : "腐化史莱姆王倒下了")
+                    : "敌人被击倒";
             hint = run.cleared ? "按 [ESC] 返回主菜单" : "按 [空格] 查看结算";
         } else {
             title = "DEFEAT";
@@ -591,6 +734,18 @@ public class GameScreen implements Screen {
                 pressedSlot = i;
                 pressTimer = ok ? 0.22f : 0.35f;
                 return;
+            }
+        }
+
+        // 鼠标点击道具使用（0.3.0，优先于技能按键处理，但同一帧只处理一次）
+        if (Gdx.input.isButtonJustPressed(Input.Buttons.LEFT)) {
+            int mx = Gdx.input.getX();
+            int my = Gdx.graphics.getHeight() - Gdx.input.getY();
+            for (int i = 0; i < itemRects.length; i++) {
+                if (itemRects[i] != null && itemRects[i].contains(mx, my)) {
+                    battle.useItem(i);
+                    return;
+                }
             }
         }
     }

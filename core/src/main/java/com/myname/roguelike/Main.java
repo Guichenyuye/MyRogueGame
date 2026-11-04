@@ -144,6 +144,34 @@ public class Main extends Game {
         return backgrounds.get(type);
     }
 
+    /**
+     * 存档管理器（0.3.1 预留骨架）。
+     * <p>
+     * 第一版暂不做本地文件读写，只把类结构搭好，将来加存档时在这里填实现。
+     * 预期做法：把 {@link RunState}（唯一持有整局状态的类）序列化成 JSON / 二进制
+     * 存到本地文件，读档时反序列化重建一局。
+     */
+    public static class SaveManager {
+        /** 存档文件路径（将来接本地 IO 时用） */
+        public static final String SAVE_FILE = "save.json";
+
+        /** 是否已启用存档（0.3.1 恒 false，接 IO 时置 true） */
+        public static boolean enabled() {
+            return false;
+        }
+
+        /** 保存当前一局（占位，未实现） */
+        public static void save(RunState run) {
+            // TODO 0.3.x：序列化 run 到本地文件
+        }
+
+        /** 读档（占位，未实现，返回 null） */
+        public static RunState load() {
+            // TODO 0.3.x：从本地文件反序列化
+            return null;
+        }
+    }
+
     /** 共享 1x1 白图，画矩形 / 边框用（不释放） */
     public Texture whiteTexture() {
         return white;

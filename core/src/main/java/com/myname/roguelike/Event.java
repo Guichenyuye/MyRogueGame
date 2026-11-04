@@ -164,6 +164,59 @@ public class Event {
                 return true;
             });
 
+    /**
+     * 大师的教导（0.3.0）：苦练——扣 5 点生命上限，随机血/力/准/防 +1
+     * / 劳逸结合——花 30 金币，得 1 点自由属性。
+     */
+    public static final Event MASTER = new Event(
+            "大师的教导",
+            "一位白发老者正在林间打拳，见你经过，微微点头。",
+            "苦练（-5 生命上限，随机属性 +1）",
+            run -> {
+                run.player.maxHp -= 5;
+                run.player.hp = Math.min(run.player.hp, run.player.maxHp);
+                // 随机血/力/准/防 +1（0 力 1 准 2 防 3 生命）
+                int attr = run.rng.nextInt(4);
+                if (attr == 3) {
+                    run.player.maxHp += 5;
+                    run.player.hp += 5;
+                } else {
+                    run.player.addAttributePoint(attr);
+                }
+                return true;
+            },
+            "劳逸结合（花 30 金币，+1 自由属性）",
+            run -> {
+                if (run.player.gold < 30) {
+                    return false;
+                }
+                run.player.gold -= 30;
+                run.pendingAttributePoints += 1;
+                return true;
+            });
+
+    /**
+     * 露天温泉（0.3.0）：简单泡泡——恢复 30% 生命 / 美美一泡——花 20 金币回满。
+     */
+    public static final Event HOT_SPRING = new Event(
+            "露天温泉",
+            "氤氲的热气从石缝间升起，一汪温泉静静地冒着泡。",
+            "简单泡泡（恢复 30% 生命）",
+            run -> {
+                int amount = Math.max(1, (int) (run.player.maxHp * 0.30));
+                run.player.heal(amount);
+                return true;
+            },
+            "美美一泡（花 20 金币，回满生命）",
+            run -> {
+                if (run.player.gold < 20) {
+                    return false;
+                }
+                run.player.gold -= 20;
+                run.player.heal(9999);
+                return true;
+            });
+
     /** 全部事件，事件节点随机抽取时从这里遍历 */
-    public static final Event[] ALL = { BUSH, CAMP, ALTAR, CULTIST };
+    public static final Event[] ALL = { BUSH, CAMP, ALTAR, CULTIST, MASTER, HOT_SPRING };
 }

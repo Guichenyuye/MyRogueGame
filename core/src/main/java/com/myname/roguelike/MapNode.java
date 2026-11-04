@@ -45,6 +45,13 @@ public class MapNode {
 
     public boolean visited = false;
 
+    /**
+     * 下一层可到达的节点（0.3.2 路线规划）。
+     * 从本节点出发，能前往的下一层节点列表（单向连接）。
+     * 空列表 = 死胡同（除非是最后一层 Boss）。
+     */
+    public final java.util.List<MapNode> connections = new java.util.ArrayList<>();
+
     public MapNode(Type type, int floor, int index) {
         this.type = type;
         this.floor = floor;

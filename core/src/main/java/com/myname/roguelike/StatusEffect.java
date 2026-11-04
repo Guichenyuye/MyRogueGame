@@ -27,28 +27,52 @@ public class StatusEffect {
         /** 中毒：每回合开始按当前层数扣血，随后层数 -1 */
         POISON,
         /** 流血：每次受伤额外扣「层数」点血，随后层数 -1 */
-        BLEED
+        BLEED,
+        // ---- 增益效果（0.3.0 起，正面 buff）----
+        /** 生命恢复：每回合开始恢复 4 点生命，持续若干回合（生命恢复药水） */
+        REGEN,
+        /** 力量：每次攻击额外造成 5 点伤害（力量药水，不触发连击/血之泪，吃免伤） */
+        STRENGTH_UP
     }
 
     public final Id id;
     public final String name;
     /** 一句话说明，显示在状态栏 / 悬停浮窗 */
     public final String desc;
-    /** 单字简称（0.2.8）：战斗界面负面效果栏用「晕 / 毒 / 血 / 虚 / 脆」这种单字紧凑显示 */
+    /** 单字简称（0.2.8）：战斗界面效果栏用「晕 / 毒 / 血 / 虚 / 脆 / 复 / 力」这种单字紧凑显示 */
     public final String shortName;
 
     /**
      * 基础强度参数（百分比按百分数记，如 30 = 30%、50 = 50%、10 = 10%）。
-     * 虚弱 / 易伤 / 怠惰用它；晕眩 / 中毒 / 流血 / 恶魔抓痕 / 旧疾用不到。
+     * 虚弱 / 易伤 / 怠惰用它；晕眩 / 中毒 / 流血 / 恶魔抓痕 / 旧疾 / 增益类用不到。
      */
     public final int magnitude;
 
+    /**
+     * 是否为增益（正面效果）。0.3.0 起区分：增益（绿色/金色）显示在前，
+     * 减益（红色/紫色）显示在后，见 {@code GameScreen} 的效果栏排序。
+     */
+    public final boolean isBuff;
+
+    /**
+     * 展示优先级（0.3.0）：数字越小越靠前。增益整体排在减益之前，
+     * 同阵营内部再按这个值排（玩家自定义的「复4 流3 毒5」顺序）。
+     */
+    public final int priority;
+
     private StatusEffect(Id id, String name, String desc, String shortName, int magnitude) {
+        this(id, name, desc, shortName, magnitude, false, 0);
+    }
+
+    private StatusEffect(Id id, String name, String desc, String shortName, int magnitude,
+                         boolean isBuff, int priority) {
         this.id = id;
         this.name = name;
         this.desc = desc;
         this.shortName = shortName;
         this.magnitude = magnitude;
+        this.isBuff = isBuff;
+        this.priority = priority;
     }
 
     // ================= 负面效果 =================
@@ -68,9 +92,19 @@ public class StatusEffect {
     public static final StatusEffect BLEED = new StatusEffect(
             Id.BLEED, "流血", "每次受伤额外扣除层数点生命，随后层数 -1", "血", 0);
 
+    // ================= 增益效果（0.3.0 起）=================
+
+    /** 生命恢复：每回合开始恢复 4 点生命（生命恢复药水） */
+    public static final StatusEffect REGEN = new StatusEffect(
+            Id.REGEN, "生命恢复", "每回合开始恢复 4 点生命", "复", 4, true, 10);
+
+    /** 力量：每次攻击额外造成 5 点伤害（力量药水） */
+    public static final StatusEffect STRENGTH_UP = new StatusEffect(
+            Id.STRENGTH_UP, "力量", "每次攻击额外造成 5 点伤害", "力", 5, true, 20);
+
     /** 全部效果定义，遍历 / 展示用（0.2.8 起不含诅咒，诅咒见 {@link Curse#ALL}） */
     public static final StatusEffect[] ALL = {
-            WEAKEN, VULNERABLE, STUN, POISON, BLEED
+            WEAKEN, VULNERABLE, STUN, POISON, BLEED, REGEN, STRENGTH_UP
     };
 
     /** 按 ID 查定义（找不到返回 null） */
@@ -166,5 +200,21 @@ public class StatusEffect {
     /** 复制一份当前状态列表（给界面显示/调试用，避免外部误改内部状态） */
     public static List<Instance> copyOf(List<Instance> list) {
         return new ArrayList<>(list);
+    }
+
+    /**
+     * 返回一份按「增益在前、减益在后，同阵营内按 priority 升序」排序后的副本（0.3.0）。
+     * <p>
+     * 不修改原列表，界面用它来决定效果栏的显示顺序（正面效果显示在前，如「复4 力5 毒5」）。
+     */
+    public static List<Instance> sortedByPriority(List<Instance> list) {
+        List<Instance> copy = new ArrayList<>(list);
+        copy.sort((a, b) -> {
+            if (a.effect.isBuff != b.effect.isBuff) {
+                return a.effect.isBuff ? -1 : 1;   // 增益在前
+            }
+            return Integer.compare(a.effect.priority, b.effect.priority);
+        });
+        return copy;
     }
 }

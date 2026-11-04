@@ -15,5 +15,7 @@ public enum CharacterType {
     /** 空梦：镜像与倒影的舞者（0.2.5 测试角色） */
     KONGMENG,
     /** 降临者：自定义捏脸角色（0.2.8），初始属性由玩家分配 */
-    DESCENDER
+    DESCENDER,
+    /** 墓渊：驱使亡灵的召唤师（0.3.0） */
+    MUYUAN
 }

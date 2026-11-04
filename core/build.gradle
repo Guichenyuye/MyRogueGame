@@ -1,0 +1,31 @@
+[compileJava, compileTestJava]*.options*.encoding = 'UTF-8'
+eclipse.project.name = appName + '-core'
+
+dependencies {
+  api "com.badlogicgames.ashley:ashley:$ashleyVersion"
+  api "com.badlogicgames.gdx:gdx-freetype:$gdxVersion"
+  api "com.badlogicgames.gdx:gdx:$gdxVersion"
+
+  if(enableGraalNative == 'true') {
+    implementation "io.github.berstanio:gdx-svmhelper-annotations:$graalHelperVersion"
+  }
+}
+
+jar {
+  duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+}
+
+// 控制台跑战斗数值自检，不启动图形窗口：./gradlew :core:battleTest
+tasks.register('battleTest', JavaExec) {
+  group = 'verification'
+  description = '运行战斗数值 + 地图生成自检（纯控制台）'
+  classpath = sourceSets.main.runtimeClasspath
+  mainClass = 'com.myname.roguelike.BattleTest'
+  // Java 18 之后 file.encoding 只管“读文件”，控制台输出要走 stdout/stderr.encoding，
+  // 否则 Windows 下中文会变成一串问号。
+  jvmArgs = [
+    '-Dfile.encoding=UTF-8',
+    '-Dstdout.encoding=UTF-8',
+    '-Dstderr.encoding=UTF-8'
+  ]
+}

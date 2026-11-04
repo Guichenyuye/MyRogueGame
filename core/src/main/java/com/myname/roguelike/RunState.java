@@ -186,6 +186,18 @@ public class RunState {
             // 兜底：还没设置当前节点时退回「当前层所有节点」（理论上不会走到）
             return map.nodesOn(floor);
         }
+        if (currentNode.connections.isEmpty()) {
+            // 0.3.2 防御兜底：正常情况 connectLayers 会保证每个节点都有后继，
+            // 这里为空说明连线生成出了异常。绝不能让玩家「无路可走」卡死，
+            // 强制退回「当前停留节点的下一层」全部节点，并打日志告警。
+            System.err.println("[RunState] 警告：节点 floor=" + currentNode.floor
+                    + " type=" + currentNode.type + " 无后继连线，兜底返回下一层全部节点");
+            int nextFloor = currentNode.floor + 1;
+            if (nextFloor > map.floorCount()) {
+                nextFloor = map.floorCount();
+            }
+            return map.nodesOn(nextFloor);
+        }
         return currentNode.connections;
     }
 

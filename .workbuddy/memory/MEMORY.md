@@ -94,6 +94,8 @@ ROGUE_FLOOR=8   java -jar ...                                        # 首领层
 - **一次性标记要消费掉**：`treasureMimic`（宝箱怪）在 `onBattleWin()` 末尾必须 `=false`，否则下一场普通战斗继续出宝箱怪；`eventCombat`、`battleFled` 同理。
 - **MapScreen 鼠标点选节点**：记录可选节点 Rectangle（`selectableRects`），点击进入；键盘数字键保留。
 - **空战斗拦截（防御性）**：`createEnemies()` 返回前必须检查列表为空则 `System.err` 告警 + 兜底 `new Slime()`，绝不能「空怪胜利」——那会让玩家放技能即 VICTORY 而节点未正确推进，地图原地死循环。
+- **options() 空列表兜底（防御性）**：`currentNode.connections.isEmpty()` 时强制返回 `nodesOn(currentNode.floor + 1)`（clamp 到 floorCount）+ 告警，绝不返回空让玩家无路可走。正常 connectLayers 保证非空，此兜底纯防御。
+- **连线职责别错位**：连线只在 `connectLayers()` 生成阶段建，**不要在 `onBattleWin()` 结算阶段动态补连线**；空列表兜底统一只在 `createEnemies()` 一处，**不要**在 EnemyPool 里 throw + 外层 catch（拆两处+异常控制流是画蛇添足）。connectLayers 现有 `j=i*(b-1)/(a-1)` 扇出算法已 2000 地图验证零死胡同，勿换成区间映射算法。
 
 ## 待办
 - 悬停浮窗真机视觉调优（字体/边距/与鼠标相对位置）。

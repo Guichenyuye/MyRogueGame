@@ -1756,6 +1756,50 @@ public class BattleTest {
             expectedFloor++;
             check("第 " + step + " 步结算后推进到第 " + expectedFloor + " 层", expectedFloor, seq.floor);
         }
+
+        System.out.println("· 1000 局完整走通：每步 options() 非空，最终抵达 Boss 层");
+        // 模拟 1000 张随机地图从第 1 层强制打到第 8 层，每一步都检查
+        // options() 非空（玩家永远有路可走），并最终 cleared（抵达 Boss）。
+        // 这是对「空敌人导致层数卡死」的最终防御性断言。
+        int stuckCount = 0;
+        int notClearedCount = 0;
+        for (int seed = 0; seed < 1000; seed++) {
+            RunState r = new RunState(seed, CharacterType.GUICHEN);
+            int guard = 0;
+            while (!r.cleared && guard++ < 20) {
+                // 每走一步前，玩家必须有得选（options 非空）
+                if (r.pending == null) {
+                    List<MapNode> opts = r.options();
+                    if (opts.isEmpty()) {
+                        stuckCount++;
+                        break;   // 卡死：options 为空
+                    }
+                    r.choose(0);
+                }
+                MapNode n = r.pending;
+                if (n == null) {
+                    stuckCount++;
+                    break;
+                }
+                if (n.type.combat) {
+                    r.onBattleWin();
+                } else {
+                    switch (n.type) {
+                        case REST -> r.resolveRest(0);
+                        case TREASURE -> r.resolveTreasure();
+                        case EVENT -> { if (r.rollEvent() != null) { /* 事件无战斗，直接推进 */ } }
+                        case SHOP -> { }
+                        default -> { }
+                    }
+                    r.advance();
+                }
+            }
+            if (!r.cleared) {
+                notClearedCount++;
+            }
+        }
+        checkTrue("1000 局：没有任何一步 options() 为空（卡死）", stuckCount == 0);
+        checkTrue("1000 局：全部通关抵达 Boss 层", notClearedCount == 0);
     }
 
     /** 从第 1 层 BFS，判断能否到达第 8 层 Boss（任一节点） */

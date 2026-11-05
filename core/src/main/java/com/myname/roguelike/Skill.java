@@ -36,7 +36,14 @@ public class Skill {
         BLOCK,         // 格挡：耗 1 精力 CD0 防御，护盾 = 3 + 防御 x1.5
         EAT_MY_SWORD,  // 吃我一剑：耗 3 精力 CD2 远程，精准 x5，自身下回合眩晕
         SLOW_BURN,     // 厚积薄发：耗 1 精力 CD2 防御，下次攻击 +150%（x2.5）
-        SLASH          // 切割：耗 2 精力 CD2 防御，接下来 3 次攻击附加 3 层流血（降临者替换技能）
+        SLASH,         // 切割：耗 2 精力 CD2 防御，接下来 3 次攻击附加 3 层流血（降临者替换技能）
+        // 0.3.0 墓渊技能
+        FLASH_THRUST,  // 瞬身突刺：耗 0 精力 CD0 近战，力量x1.5 + 精准x1.2
+        SOUL_WREATH,   // 魂绕：耗 1 精力 CD0 防御，护盾 = 召唤物数量x3 + 防御x1.5
+        SUMMON_ZOMBIE, // 唤起：耗 3 精力 CD3，召唤一个普通僵尸
+        DEATH_WHIRL,   // 死之旋风：耗 4 精力 CD3 AOE，力量x2
+        SUMMON_GHOST,  // 后方支援：耗 5 精力 CD4，召唤一个幽魂（墓渊替换技能）
+        DEATH_SURGE    // 死亡激荡：耗 4 精力 CD3 远程，对最低血敌人 5 + 精准x1.5（墓渊替换技能）
     }
 
     public final Id id;
@@ -170,6 +177,38 @@ public class Skill {
     public static final Skill SLASH = new Skill(
             Id.SLASH, "切割", Type.DEFEND, 2, 2,
             "接下来 3 次攻击对目标附加 3 层流血", CharacterType.DESCENDER);
+
+    // ================= 0.3.0 墓渊技能 ==================
+
+    /** 瞬身突刺：耗 0 精力 CD0 近战，对最前方敌人造成 力量x1.5 + 精准x1.2 伤害 */
+    public static final Skill FLASH_THRUST = new Skill(
+            Id.FLASH_THRUST, "瞬身突刺", Type.MELEE, 0, 0,
+            "对最前方敌人造成 力量x1.5 + 精准x1.2 伤害");
+
+    /** 魂绕：耗 1 精力 CD0 防御，护盾 = 召唤物数量x3 + 防御x1.5 */
+    public static final Skill SOUL_WREATH = new Skill(
+            Id.SOUL_WREATH, "魂绕", Type.DEFEND, 1, 0,
+            "获得护盾 = 召唤物数量x3 + 防御x1.5");
+
+    /** 唤起：耗 3 精力 CD3，召唤一个普通僵尸（血 = 精准x4） */
+    public static final Skill SUMMON_ZOMBIE = new Skill(
+            Id.SUMMON_ZOMBIE, "唤起", Type.DEFEND, 3, 3,
+            "召唤一个普通僵尸（血量 = 精准x4）");
+
+    /** 死之旋风：耗 4 精力 CD3 AOE，对所有敌人造成 力量x2 伤害 */
+    public static final Skill DEATH_WHIRL = new Skill(
+            Id.DEATH_WHIRL, "死之旋风", Type.AOE, 4, 3,
+            "对所有敌人造成 力量x2 伤害");
+
+    /** 后方支援：耗 5 精力 CD4，召唤一个幽魂（血 = 精准x5）（墓渊专属替换技能） */
+    public static final Skill SUMMON_GHOST = new Skill(
+            Id.SUMMON_GHOST, "后方支援", Type.DEFEND, 5, 4,
+            "召唤一个幽魂（血量 = 精准x5）", CharacterType.MUYUAN);
+
+    /** 死亡激荡：耗 4 精力 CD3 远程，对最低血量敌人造成 5 + 精准x1.5（墓渊专属替换技能） */
+    public static final Skill DEATH_SURGE = new Skill(
+            Id.DEATH_SURGE, "死亡激荡", Type.RANGED, 4, 3,
+            "对血量最低的敌人造成 5 + 精准x1.5 伤害", CharacterType.MUYUAN);
 
     @Override
     public String toString() {

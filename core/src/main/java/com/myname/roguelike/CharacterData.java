@@ -88,8 +88,24 @@ public class CharacterData {
             "resources/image/role/guichen_role.png",   // 占位，实际由 Main 生成问号头像
             "resources/image/role_ground/guichen_ground.png");
 
+    /**
+     * 墓渊：驱使亡灵的召唤师（0.3.0）。
+     * <p>
+     * 面板 60 血 / 力 2 / 准 5 / 防 2；初始天赋「亡灵项链」；初始四技能
+     * 瞬身突刺 / 魂绕 / 唤起（召唤僵尸）/ 死之旋风。贴图用 muyuan 前缀的头像和背景。
+     */
+    public static final CharacterData MUYUAN = new CharacterData(
+            CharacterType.MUYUAN,
+            "墓渊",
+            "驱使亡灵的召唤师",
+            60, 10, 2, 5, 2,
+            new Talent[]{ Talent.NECKLACE_OF_UNDEAD },
+            new Skill[]{ Skill.FLASH_THRUST, Skill.SOUL_WREATH, Skill.SUMMON_ZOMBIE, Skill.DEATH_WHIRL },
+            "resources/image/role/muyuan_role.png",
+            "resources/image/role_ground/muyuan_ground.png");
+
     /** 全部可选角色，角色选择界面从这里循环渲染。降临者（DESCENDER）走捏脸流程，不直接进地图 */
-    public static final CharacterData[] ALL = { GUICHEN, KONGMENG };
+    public static final CharacterData[] ALL = { GUICHEN, KONGMENG, MUYUAN };
 
     /** 按类型查数据（找不到返回 null） */
     public static CharacterData of(CharacterType type) {

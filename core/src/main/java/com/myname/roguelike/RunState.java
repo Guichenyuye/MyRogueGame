@@ -23,6 +23,9 @@ public class RunState {
     /** 本局玩家选择的角色（0.2.4 起在角色选择界面锁定）。默认归尘 */
     public CharacterType character = CharacterType.GUICHEN;
 
+    /** 当前章节（0.3.1 起）。决定敌人池 / 首领 / 地图主题。默认沼之森 */
+    public Chapter currentChapter = Chapter.SWAMP;
+
     /**
      * 本局持续、不可消除的诅咒（0.2.8）。
      * 与 {@link Player#curses} 共享同一个列表引用，事件通过 {@code run.curses.add(...)}
@@ -35,6 +38,13 @@ public class RunState {
 
     /** 玩家在当前层选中的节点，null 表示还没选 */
     public MapNode pending;
+
+    /**
+     * 玩家当前「停留」的节点（0.3.2 路线规划）。
+     * 玩家只能沿它的 {@link MapNode#connections} 前往下一层，不能跨线乱跳。
+     * 初始为第 1 层唯一节点，每次战斗/非战斗结算后更新为刚访问的那个节点。
+     */
+    public MapNode currentNode;
 
     /** 首领已击破 */
     public boolean cleared = false;
@@ -76,6 +86,12 @@ public class RunState {
      * 胜利按普通战斗结算。
      */
     public boolean eventCombat = false;
+
+    /**
+     * 刚打完的战斗是否有敌人怯战逃跑（0.3.0 新手及时）。
+     * 由 GameScreen 在调用 {@link #onBattleWin()} 前设置，逃跑则金币 0、经验减半。
+     */
+    public boolean battleFled = false;
 
     public RunState() {
         this(resolveSeed(), CharacterType.GUICHEN);
@@ -119,6 +135,12 @@ public class RunState {
         this(seed, new Player(character));
     }
 
+    /** 指定种子 + 角色 + 章节（0.3.1 章节选择入口用） */
+    public RunState(long seed, CharacterType character, Chapter chapter) {
+        this(seed, new Player(character));
+        this.currentChapter = chapter;
+    }
+
     /**
      * 指定种子 + 已构造好的 Player（0.2.8 降临者捏脸用：三维是分配出来的，不能用
      * {@code new Player(CharacterType.DESCENDER)} 的模板默认值）。
@@ -132,6 +154,11 @@ public class RunState {
         this.map = GameMap.generate(rng);
         this.floor = resolveStartFloor();
         this.pending = map.nodesOn(floor).get(0);   // 第 1 层固定一个战斗节点，直接开打
+        // 0.3.2 路线规划：开局玩家「尚未停留在任何节点」，当前节点为 null。
+        // 这样 options() 会退回返回第 1 层节点（见 options()），玩家必须先进入第 1 层战斗，
+        // 打完 markVisited() 才把 currentNode 设为刚访问的节点，之后才能沿连线走。
+        // 之前把 currentNode 直接设成第 1 层节点，导致 options() 返回第 2 层，第 1 层战斗被跳过。
+        this.currentNode = null;
     }
 
     /** 调试用：{@code -Drogue.floor=8} 直接从首领层开局，省得每次打上去 */
@@ -153,12 +180,28 @@ public class RunState {
 
     // ==================== 地图查询 ====================
 
-    /** 当前层可选的节点（1~3 个） */
+    /** 当前可选的节点（0.3.2 起 = 当前节点沿连线能去的下一层节点，1~3 个） */
     public List<MapNode> options() {
-        return map.nodesOn(floor);
+        if (currentNode == null) {
+            // 兜底：还没设置当前节点时退回「当前层所有节点」（理论上不会走到）
+            return map.nodesOn(floor);
+        }
+        if (currentNode.connections.isEmpty()) {
+            // 0.3.2 防御兜底：正常情况 connectLayers 会保证每个节点都有后继，
+            // 这里为空说明连线生成出了异常。绝不能让玩家「无路可走」卡死，
+            // 强制退回「当前停留节点的下一层」全部节点，并打日志告警。
+            System.err.println("[RunState] 警告：节点 floor=" + currentNode.floor
+                    + " type=" + currentNode.type + " 无后继连线，兜底返回下一层全部节点");
+            int nextFloor = currentNode.floor + 1;
+            if (nextFloor > map.floorCount()) {
+                nextFloor = map.floorCount();
+            }
+            return map.nodesOn(nextFloor);
+        }
+        return currentNode.connections;
     }
 
-    /** 选中本层第 index 个节点 */
+    /** 选中第 index 个可前往的节点 */
     public MapNode choose(int index) {
         List<MapNode> list = options();
         if (index < 0 || index >= list.size()) {
@@ -201,6 +244,22 @@ public class RunState {
      * @return 给界面显示的结算文字
      */
     public String resolveTreasure() {
+        // 0.3.0 宝箱限定奖励（低概率，先判定，命中则直接返回，不走常规三选一）：
+        // 诸武精通 1%、出金了 3%（诸武精通更稀有，先判定）
+        double specialRoll = rng.nextDouble();
+        if (specialRoll < 0.01) {
+            // 诸武精通：所有伤害 x1.2（宝箱限定天赋）
+            player.grantTalent(Talent.WEAPON_MASTERY);
+            consecutiveTalentFromTreasure = 0;
+            return "你从箱底翻出一枚泛着幽光的徽记。\n\n获得天赋【诸武精通】：所有伤害（含召唤物）x1.2";
+        }
+        if (specialRoll < 0.04) {   // 0.01 ~ 0.04 = 3%
+            // 出金了：暴击率固定在 30%，后续无法提升
+            player.critLocked = true;
+            consecutiveTalentFromTreasure = 0;
+            return "金光乍现，你的武器被一股力量重新淬炼。\n\n【出金了！】：暴击率固定在 30%，后续无法提升";
+        }
+
         // 决定「这次能不能给天赋」：连续 2 次开天赋 -> 这次强制不给
         boolean talentForbidden = consecutiveTalentFromTreasure >= 2;
 
@@ -304,6 +363,25 @@ public class RunState {
         // CD 跨节点清零（0.2 需求第 1 条）：下一场一开局四个技能必须都是可用状态。
         player.resetCooldowns();
 
+        // 亡灵项链（0.3.0 墓渊初始天赋）：战斗结束时场上每个存活召唤物给自身 2 点生命，
+        // 若满血则直接提升生命上限 2 点。
+        if (player.hasTalent(Talent.Id.NECKLACE_OF_UNDEAD) && !player.minions.isEmpty()) {
+            int aliveCount = 0;
+            for (Minion m : player.minions) {
+                if (m.isAlive()) {
+                    aliveCount++;
+                }
+            }
+            for (int i = 0; i < aliveCount; i++) {
+                if (player.hp < player.maxHp) {
+                    player.heal(2);
+                } else {
+                    player.maxHp += 2;
+                    player.hp += 2;
+                }
+            }
+        }
+
         // 宝箱怪（0.2.8）：按精英战结算（精英奖励二选一）+ 额外 20 金币
         lastBattleWasElite = treasureMimic
                 || (pending != null && pending.type == MapNode.Type.ELITE);
@@ -318,9 +396,16 @@ public class RunState {
         if (treasureMimic) {
             lastGoldGain += 20;   // 宝箱怪额外 20 金币
         }
+        // 0.3.0 新手及时怯战逃跑：胜利但不给金币、经验减半
+        if (battleFled) {
+            lastGoldGain = 0;
+        }
         player.gold += lastGoldGain;
         // 经验：按节点类型发，精英/首领给得多。gainExp 会顺便结算升级。
         int expGain = combatExpGain();
+        if (battleFled) {
+            expGain = Math.max(1, expGain / 2);   // 逃跑经验减半
+        }
         lastExpGain = expGain;
         exp += expGain;   // 先累加，升级判定留给 ResultScreen 逐级处理（见 processLevelUps）
 
@@ -334,6 +419,10 @@ public class RunState {
         pending = null;
         // 0.2.8 帐篷主人：事件触发的战斗结束后清除标记，避免下一场普通战斗误出帐篷主人
         eventCombat = false;
+        // 0.2.8 宝箱怪：宝箱怪战斗结束后清除标记，避免下一场普通战斗节点误出宝箱怪（0.3.2 修复）
+        treasureMimic = false;
+        // 逃跑标记本场消费掉
+        battleFled = false;
     }
 
     /** 战斗节点给的经验（普通 8 / 精英 16 / 首领 24，都是 1 级升 2 级所需 8 的整数倍） */
@@ -546,7 +635,10 @@ public class RunState {
      */
     public Skill rollUnownedReplSkill() {
         List<Skill> pool = new ArrayList<>();
-        Skill[] replPool = { Skill.CHARGE, Skill.MULTI_SHOT, Skill.BLOOD_SPIKE, Skill.SLASH };
+        Skill[] replPool = {
+                Skill.CHARGE, Skill.MULTI_SHOT, Skill.BLOOD_SPIKE, Skill.SLASH,        // 归尘 + 降临者
+                Skill.SUMMON_GHOST, Skill.DEATH_SURGE                                   // 0.3.2 补全墓渊
+        };
         for (Skill s : replPool) {
             // 只抽当前角色的专属技能 + 通用技能（owner == null）
             if (s.owner != null && s.owner != character) {
@@ -658,6 +750,8 @@ public class RunState {
     private void markVisited() {
         if (pending != null) {
             pending.visited = true;
+            // 0.3.2 路线规划：访问过的节点成为新的「当前停留节点」，下一步沿它的连线走
+            currentNode = pending;
         }
     }
 
@@ -669,21 +763,30 @@ public class RunState {
      * 0.2.8 宝箱怪：若 {@link #treasureMimic} 为 true，固定返回宝箱怪（宝箱节点的隐藏战斗）。
      */
     public List<Enemy> createEnemies() {
+        List<Enemy> list;
         if (pending == null) {
-            return new ArrayList<>();
-        }
-        if (treasureMimic) {
-            List<Enemy> list = new ArrayList<>();
+            list = new ArrayList<>();
+        } else if (treasureMimic) {
+            // 0.2.8 宝箱怪：宝箱节点的隐藏战斗
+            list = new ArrayList<>();
             list.add(new TreasureChest());
-            return list;
-        }
-        if (eventCombat) {
+        } else if (eventCombat) {
             // 0.2.8 帐篷主人：事件触发的隐藏战斗
-            List<Enemy> list = new ArrayList<>();
+            list = new ArrayList<>();
             list.add(new TentOwner());
-            return list;
+        } else {
+            list = EnemyPool.create(pending.type, pending.floor, rng, currentChapter);
         }
-        return EnemyPool.create(pending.type, pending.floor, rng);
+        // 0.3.2 空战斗拦截（防死循环）：战斗节点绝不能生成出空敌人列表。
+        // 一旦出现「空怪」，玩家随便放个技能就 VICTORY，而节点状态若没正确推进，
+        // 地图就会把玩家留在原地无限循环。这里兜底塞一个史莱姆 + 打印告警，宁可
+        // 让玩家打一场不该有的战斗，也绝不允许「空怪胜利」污染流程状态。
+        if (list.isEmpty()) {
+            System.err.println("[RunState] 警告：节点 " + (pending == null ? "null" : pending.type)
+                    + " 生成了空敌人列表，已兜底塞入一只史莱姆。请检查 EnemyPool 抽取参数。");
+            list.add(new Slime());
+        }
+        return list;
     }
 
     /**

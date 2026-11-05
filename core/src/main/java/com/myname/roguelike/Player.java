@@ -150,6 +150,37 @@ public class Player {
     public int gold = 0;
 
     /**
+     * 玩家持有的道具（0.3.0 起）。同一种道具可叠加多瓶，用 {@code List<Item>} 存储
+     * （可重复）。战斗界面顶部左侧显示，鼠标点击使用。
+     */
+    public final List<Item> items = new ArrayList<>();
+
+    /**
+     * 商店里「清除诅咒」已购买的次数（0.3.0 起）。首次 50 金币，之后每次 +15。
+     */
+    public int curseCleanseCount = 0;
+
+    /**
+     * 商店里「属性点」已购买的次数（0.3.0 起）。价格递增 15 / 30 / 50。
+     */
+    public int attributePurchaseCount = 0;
+
+    /** 玩家场上的召唤物（0.3.0 墓渊）。战斗结束后由 RunState 结算「亡灵项链」等。 */
+    public final List<Minion> minions = new ArrayList<>();
+
+    /**
+     * 「出金了！」宝箱奖励（0.3.0）：暴击率固定在 30%，后续无法提升。
+     * 置 true 后 {@code BattleSystem} 暴击判定直接用 0.30，不再叠加任何加成。
+     */
+    public boolean critLocked = false;
+
+    /**
+     * 「亡者气质」天赋（0.3.0 墓渊）本场战斗是否已触发过减半。
+     * 每场战斗第一次受到超过 15 的伤害减半，之后不再触发。战斗开始重置为 false。
+     */
+    public boolean deadAuraUsed = false;
+
+    /**
      * 已过的玩家回合数（startTurn 递增一次）。「持久战意」技巧用它在每 3 回合额外回蓝。
      */
     public int turnCount = 0;

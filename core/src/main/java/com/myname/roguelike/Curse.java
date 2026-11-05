@@ -19,7 +19,9 @@ public class Curse {
         /** 怠惰：每次攻击造成的伤害 -10% */
         SLOTH,
         /** 旧疾：有 10% 概率跳过本回合 */
-        OLD_ILLNESS
+        OLD_ILLNESS,
+        /** 贪婪者（0.3.0）：金币 < 50 时伤害 -20%，金币 < 100 时伤害 -10% */
+        GREEDY
     }
 
     public final Id id;
@@ -41,8 +43,12 @@ public class Curse {
     public static final Curse OLD_ILLNESS = new Curse(
             Id.OLD_ILLNESS, "旧疾", "有 10% 概率跳过本回合");
 
+    /** 贪婪者（0.3.0）：金币 < 50 伤害 -20%，金币 < 100 伤害 -10% */
+    public static final Curse GREEDY = new Curse(
+            Id.GREEDY, "贪婪者", "金币少于 50 时伤害 -20%，少于 100 时伤害 -10%");
+
     /** 全部诅咒，献祭随机抽取时从这里遍历 */
-    public static final Curse[] ALL = { DEMON_CLAW, SLOTH, OLD_ILLNESS };
+    public static final Curse[] ALL = { DEMON_CLAW, SLOTH, OLD_ILLNESS, GREEDY };
 
     /** 按 ID 查定义（找不到返回 null） */
     public static Curse of(Id id) {

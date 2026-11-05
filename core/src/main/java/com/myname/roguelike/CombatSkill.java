@@ -43,7 +43,23 @@ public class CombatSkill {
         FREE_CRIT,
         // ---- 归尘专属（0.2.8 新增）----
         /** 锈蚀箭矢：所有远程伤害造成 2 层流血（多段远程每段独立触发） */
-        RUSTED_ARROW
+        RUSTED_ARROW,
+        // ---- 通用（0.3.0 新增）----
+        /** 长期训练：免伤 +1%（乘法减伤叠加） */
+        LONG_TRAINING,
+        /** 聚精会神：暴击率 +2% */
+        FOCUS,
+        /** 粗鄙之人：攻击有 2% 概率晕眩敌人 */
+        CRUDE,
+        /** 老毒物：自身和召唤物对敌人造成的中毒效果额外获得 1 层（0.3.1 通用） */
+        OLD_POISONER,
+        // ---- 墓渊专属（0.3.0 新增）----
+        /** 久经：召唤物伤害 x1.1 */
+        SEASONED,
+        /** 死气：召唤物血量 +5 */
+        DEATH_QI,
+        /** 再临：墓渊每次攻击恢复召唤物 1 点血 */
+        RECALL
     }
 
     public final Id id;
@@ -91,11 +107,46 @@ public class CombatSkill {
     public static final CombatSkill RUSTED_ARROW = new CombatSkill(
             Id.RUSTED_ARROW, "锈蚀箭矢", "所有远程伤害额外造成 2 层流血", CharacterType.GUICHEN);
 
+    // ================= 通用技巧（0.3.0 新增 3 个）=================
+
+    /** 长期训练：免伤 +1%（乘法减伤叠加） */
+    public static final CombatSkill LONG_TRAINING = new CombatSkill(
+            Id.LONG_TRAINING, "长期训练", "免伤 +1%", null);
+
+    /** 聚精会神：暴击率 +2% */
+    public static final CombatSkill FOCUS = new CombatSkill(
+            Id.FOCUS, "聚精会神", "暴击率 +2%", null);
+
+    /** 粗鄙之人：攻击有 2% 概率晕眩敌人 */
+    public static final CombatSkill CRUDE = new CombatSkill(
+            Id.CRUDE, "粗鄙之人", "攻击有 2% 概率晕眩敌人", null);
+
+    /** 老毒物：自身和召唤物对敌人造成的中毒效果额外获得 1 层（0.3.1 通用） */
+    public static final CombatSkill OLD_POISONER = new CombatSkill(
+            Id.OLD_POISONER, "老毒物", "自身和召唤物对敌人造成的中毒效果额外 +1 层", null);
+
+    // ================= 墓渊专属技巧（0.3.0）=================
+
+    /** 久经：召唤物伤害 x1.1 */
+    public static final CombatSkill SEASONED = new CombatSkill(
+            Id.SEASONED, "久经", "召唤物伤害 x1.1", CharacterType.MUYUAN);
+
+    /** 死气：召唤物血量 +5 */
+    public static final CombatSkill DEATH_QI = new CombatSkill(
+            Id.DEATH_QI, "死气", "召唤物血量 +5", CharacterType.MUYUAN);
+
+    /** 再临：墓渊每次攻击恢复召唤物 1 点血 */
+    public static final CombatSkill RECALL = new CombatSkill(
+            Id.RECALL, "再临", "墓渊每次攻击恢复召唤物 1 点血", CharacterType.MUYUAN);
+
     /** 全部技巧，三选一随机抽取时从这里遍历 */
     public static final CombatSkill[] ALL = {
             DEFEND_BONUS_SHIELD, RANGED_UP, MELEE_UP,
             MP_REGEN, AOE_UP, CD_REDUCE,
             DOUBLE_HIT, RANGED_LIFESTEAL, FREE_CRIT,
-            RUSTED_ARROW
+            RUSTED_ARROW,
+            LONG_TRAINING, FOCUS, CRUDE,
+            OLD_POISONER,
+            SEASONED, DEATH_QI, RECALL
     };
 }

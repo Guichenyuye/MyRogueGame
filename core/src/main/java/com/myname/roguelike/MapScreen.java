@@ -61,6 +61,10 @@ public class MapScreen implements Screen {
     /** 是否弹出了「放弃本局」确认框（0.2.5） */
     private boolean confirmAbort = false;
 
+    /** 0.3.2 鼠标点选：当前可选节点的命中区域（渲染时填充，鼠标点击时查表） */
+    private final java.util.Map<MapNode, com.badlogic.gdx.math.Rectangle> selectableRects =
+            new java.util.HashMap<>();
+
     public MapScreen(Main game, RunState run) {
         this.game = game;
         this.run = run;
@@ -125,13 +129,13 @@ public class MapScreen implements Screen {
         ui.text("金币 " + run.player.gold, 400, top - 4, GOLD_COLOR, 1.0f);
 
         // 中：章节名 + 进度
-        ui.textCentered("腐叶浅林", w / 2f, top - 2, Color.WHITE, 1.3f);
+        ui.textCentered(run.currentChapter.name, w / 2f, top - 2, Color.WHITE, 1.3f);
         ui.textCentered("第 " + run.floor + " / " + GameMap.FLOORS + " 层",
                 w / 2f, top - 34, DIM, 1.0f);
 
         // 右：提示
         if (popup == Popup.NONE) {
-            String tip = "按数字键选择路线";
+            String tip = "点击可选节点继续";
             ui.text(tip, w - 20 - ui.measure(tip, 1.0f), top - 20, DIM, 1.0f);
         }
     }
@@ -150,11 +154,11 @@ public class MapScreen implements Screen {
             color = GREEN;
         } else {
             int count = run.options().size();
-            StringBuilder sb = new StringBuilder("按 ");
+            StringBuilder sb = new StringBuilder("点击");
             for (int i = 0; i < count; i++) {
-                sb.append("[").append(i + 1).append("] ");
+                sb.append(" 节点[").append(i + 1).append("]");
             }
-            sb.append("选择要前往的节点      [ESC] 放弃本局");
+            sb.append(" 继续前进      [ESC] 放弃本局");
             hint = sb.toString();
             color = Color.WHITE;
         }
@@ -173,16 +177,26 @@ public class MapScreen implements Screen {
         float nodeH = Math.min(NODE_H, rowGap * 0.74f);
         float centerX = w / 2f;
 
-        // 先画连线：只画「当前层 -> 上一层」，线太多会变成一团乱麻
-        if (run.floor < floors) {
-            List<MapNode> here = run.options();
-            List<MapNode> up = run.map.nodesOn(run.floor + 1);
-            Color link = new Color(0.55f, 0.50f, 0.30f, 0.45f);
-            for (MapNode a : here) {
-                for (MapNode b : up) {
-                    ui.line(centerX + laneOffset(a, here.size()), nodeY(a.floor, mapBottom, rowGap) + nodeH / 2f,
-                            centerX + laneOffset(b, up.size()), nodeY(b.floor, mapBottom, rowGap) - nodeH / 2f,
-                            1f, link);
+        // 每帧重建可选节点的命中区域（先清空，绘制时再填充）
+        selectableRects.clear();
+
+        // 0.3.2 路线规划：画所有节点的 connections 连线（上一层节点底部 -> 下一层节点顶部）
+        List<MapNode> selectable = run.options();
+        for (int floor = 1; floor < floors; floor++) {
+            List<MapNode> upper = run.map.nodesOn(floor);
+            for (MapNode node : upper) {
+                float x1 = centerX + laneOffset(node, upper.size());
+                float y1 = nodeY(floor, mapBottom, rowGap) - nodeH / 2f;   // 节点底部
+                for (MapNode next : node.connections) {
+                    List<MapNode> lower = run.map.nodesOn(next.floor);
+                    float x2 = centerX + laneOffset(next, lower.size());
+                    float y2 = nodeY(next.floor, mapBottom, rowGap) + nodeH / 2f;   // 节点顶部
+                    // 只有「从当前节点出发」的连线才亮，其余暗色（可规划但当前到不了）
+                    boolean active = node == run.currentNode;
+                    Color link = active
+                            ? new Color(0.85f, 0.80f, 0.45f, 0.95f)
+                            : new Color(0.45f, 0.42f, 0.30f, 0.35f);
+                    ui.line(x1, y1, x2, y2, active ? 2.2f : 1f, link);
                 }
             }
         }
@@ -193,7 +207,7 @@ public class MapScreen implements Screen {
 
             for (MapNode node : nodes) {
                 float cx = centerX + laneOffset(node, nodes.size());
-                drawNode(node, cx - NODE_W / 2f, cy - nodeH / 2f, nodeH);
+                drawNode(node, cx - NODE_W / 2f, cy - nodeH / 2f, nodeH, selectable);
             }
         }
     }
@@ -208,37 +222,51 @@ public class MapScreen implements Screen {
         return (node.index - (count - 1) / 2f) * NODE_STEP;
     }
 
-    private void drawNode(MapNode node, float x, float y, float h) {
+    private void drawNode(MapNode node, float x, float y, float h, List<MapNode> selectable) {
         Color accent = typeColor(node.type);
-        boolean current = node.floor == run.floor;
         boolean passed = node.floor < run.floor;
+        boolean isCurrentStanding = node == run.currentNode;
+        // 0.3.2：只有「当前节点沿连线能去的节点」才可选；其余下一层节点置灰不可点
+        boolean selectableNow = selectable.contains(node);
 
         // 单行文字，垂直居中：文字高 24px，顶部 = 中心 + 12
         float labelY = y + h / 2f + 12f;
-        // 已通过 / 未探索的描边都比当前层细一档，视线自然落在能走的那层
-        Color edge = current ? accent : dim(accent, passed ? 0.35f : 0.42f);
-        Color textColor = current ? Color.WHITE : dim(accent, passed ? 0.40f : 0.55f);
 
-        ui.rect(x, y, NODE_W, h, current
-                ? new Color(0.14f, 0.15f, 0.18f, 0.98f)
-                : new Color(0.08f, 0.08f, 0.10f, 0.90f));
-        ui.frame(x, y, NODE_W, h, edge);
-
-        if (current) {
-            // 当前层额外画一圈外发光，方便一眼看出能走哪几个
+        if (isCurrentStanding) {
+            // 当前停留节点：彩色描边 + 序号
+            ui.rect(x, y, NODE_W, h, new Color(0.14f, 0.15f, 0.18f, 0.98f));
+            ui.frame(x, y, NODE_W, h, accent);
             ui.frame(x - 2, y - 2, NODE_W + 4, h + 4, new Color(accent.r, accent.g, accent.b, 0.28f));
-            ui.text("[" + (node.index + 1) + "]", x - 32, labelY, Color.YELLOW, 1.0f);
             ui.textCentered(node.type.label, x + NODE_W / 2f, labelY, Color.WHITE, 1.0f);
+            ui.text("*", x - 30, labelY, Color.YELLOW, 1.0f);   // 标记当前所在
+            return;
+        }
+
+        if (selectableNow) {
+            // 可选的下一层节点：亮色描边 + 数字序号
+            int idx = selectable.indexOf(node);
+            ui.rect(x, y, NODE_W, h, new Color(0.14f, 0.15f, 0.18f, 0.98f));
+            ui.frame(x, y, NODE_W, h, accent);
+            ui.frame(x - 2, y - 2, NODE_W + 4, h + 4, new Color(accent.r, accent.g, accent.b, 0.28f));
+            ui.text("[" + (idx + 1) + "]", x - 32, labelY, Color.YELLOW, 1.0f);
+            ui.textCentered(node.type.label, x + NODE_W / 2f, labelY, Color.WHITE, 1.0f);
+            // 0.3.2 鼠标点选：记录命中区域，供 handleInput 点击
+            selectableRects.put(node, new com.badlogic.gdx.math.Rectangle(x, y, NODE_W, h));
             return;
         }
 
         if (passed) {
-            // 已通过的层整层都是这个状态，不需要额外标注，颜色压暗就够
-            ui.textCentered(node.type.label, x + NODE_W / 2f, labelY, textColor, 1.0f);
+            // 已通过的层：压暗
+            ui.rect(x, y, NODE_W, h, new Color(0.08f, 0.08f, 0.10f, 0.90f));
+            ui.frame(x, y, NODE_W, h, dim(accent, 0.35f));
+            ui.textCentered(node.type.label, x + NODE_W / 2f, labelY, dim(accent, 0.40f), 1.0f);
             return;
         }
 
-        ui.textCentered(node.type.label, x + NODE_W / 2f, labelY, textColor, 1.0f);
+        // 未探索且当前到不了：只留暗色轮廓（类型仍可见，方便规划）
+        ui.rect(x, y, NODE_W, h, new Color(0.07f, 0.07f, 0.09f, 0.85f));
+        ui.frame(x, y, NODE_W, h, dim(accent, 0.30f));
+        ui.textCentered(node.type.label, x + NODE_W / 2f, labelY, dim(accent, 0.38f), 1.0f);
     }
 
     /** 按比例压暗一个颜色，用来区分同色系的主标题和副标题 */
@@ -434,6 +462,19 @@ public class MapScreen implements Screen {
             return;
         }
 
+        // 0.3.2 鼠标点选：点击可选节点直接进入（优先于键盘，和角色选择/章节选择一致）
+        if (Gdx.input.isButtonJustPressed(Input.Buttons.LEFT)) {
+            int mx = Gdx.input.getX();
+            int my = Gdx.graphics.getHeight() - Gdx.input.getY();
+            for (MapNode node : run.options()) {
+                com.badlogic.gdx.math.Rectangle rect = selectableRects.get(node);
+                if (rect != null && rect.contains(mx, my)) {
+                    enterNode(node);
+                    return;
+                }
+            }
+        }
+
         int[] keyCodes = {Input.Keys.NUM_1, Input.Keys.NUM_2, Input.Keys.NUM_3};
         for (int i = 0; i < keyCodes.length; i++) {
             if (!Gdx.input.isKeyJustPressed(keyCodes[i])) {
@@ -447,32 +488,41 @@ public class MapScreen implements Screen {
             if (node == null) {
                 return;
             }
-            if (node.type.combat) {
+            enterNode(node);
+            return;
+        }
+    }
+
+    /** 0.3.2 进入一个已选中的节点：按类型分发到战斗 / 宝箱 / 篝火 / 事件 / 商店 */
+    private void enterNode(MapNode node) {
+        if (node.type.combat) {
+            game.setScreen(new GameScreen(game, run));
+            dispose();
+        } else if (node.type == MapNode.Type.TREASURE) {
+            // 0.2.8 宝箱怪：10% 概率变成宝箱怪战斗，否则正常开箱
+            if (run.rollTreasureMimic()) {
                 game.setScreen(new GameScreen(game, run));
                 dispose();
-            } else if (node.type == MapNode.Type.TREASURE) {
-                // 0.2.8 宝箱怪：10% 概率变成宝箱怪战斗，否则正常开箱
-                if (run.rollTreasureMimic()) {
-                    game.setScreen(new GameScreen(game, run));
-                    dispose();
-                } else {
-                    resultText = run.resolveTreasure();
-                    popup = Popup.RESULT;
-                }
-            } else if (node.type == MapNode.Type.REST) {
-                popup = Popup.REST;
-            } else if (node.type == MapNode.Type.EVENT) {
-                currentEvent = run.rollEvent();
-                eventHint = null;
-                if (currentEvent == null) {
-                    // 0.2.8 事件去重：所有事件都遇过了，降级成宝箱奖励
-                    resultText = run.resolveTreasure();
-                    popup = Popup.RESULT;
-                } else {
-                    popup = Popup.EVENT;
-                }
+            } else {
+                resultText = run.resolveTreasure();
+                popup = Popup.RESULT;
             }
-            return;
+        } else if (node.type == MapNode.Type.REST) {
+            popup = Popup.REST;
+        } else if (node.type == MapNode.Type.EVENT) {
+            currentEvent = run.rollEvent();
+            eventHint = null;
+            if (currentEvent == null) {
+                // 0.2.8 事件去重：所有事件都遇过了，降级成宝箱奖励
+                resultText = run.resolveTreasure();
+                popup = Popup.RESULT;
+            } else {
+                popup = Popup.EVENT;
+            }
+        } else if (node.type == MapNode.Type.SHOP) {
+            // 0.3.0 商店：切到商店界面
+            game.setScreen(new ShopScreen(game, run));
+            dispose();
         }
     }
 

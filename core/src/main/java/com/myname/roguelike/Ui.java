@@ -1,5 +1,6 @@
 package com.myname.roguelike;
 
+import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.graphics.Color;
 import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.Texture;
@@ -135,5 +136,58 @@ public class Ui {
 
     public SpriteBatch batch() {
         return batch;
+    }
+
+    // ==================== 浮窗（0.3.2 悬停详情）====================
+
+    /**
+     * 在鼠标位置右下方画一个半透明黑色浮窗，白字显示完整描述。
+     * <p>
+     * 自动换行到 {@code maxWidth}，浮窗高度按内容自适应；超出屏幕右/下边就向左/上翻，
+     * 避免浮窗跑到窗口外面看不见。画在最上层（调用方保证它在其它绘制之后调用）。
+     *
+     * @param text     描述文字（可多行，内部自动换行）
+     * @param mouseX   鼠标屏幕坐标 x（Gdx.input.getX()，原点左上）
+     * @param mouseY   鼠标屏幕坐标 y（Gdx.input.getY()，原点左上）
+     * @param maxWidth 浮窗最大宽度
+     */
+    public void drawTooltip(String text, float mouseX, float mouseY, float maxWidth) {
+        if (text == null || text.isEmpty()) {
+            return;
+        }
+        font.getData().setScale(1f);
+        layout.setText(font, text, Color.WHITE, maxWidth - 24f, Align.left, true);
+
+        float pad = 12f;
+        float boxW = layout.width + pad * 2;
+        float boxH = layout.height + pad * 2;
+
+        // 屏幕坐标：原点在左上。鼠标右下方 = x 右移、y 下移（屏幕 y 向下增）。
+        float sx = mouseX + 18f;
+        float sy = mouseY + 24f;
+
+        // 越界则翻转：浮窗底边超出屏幕底部 -> 放到鼠标上方；右边超出 -> 放到鼠标左侧
+        if (sy - boxH < 0) {
+            sy = mouseY - 12f;   // 浮窗底边贴鼠标上方
+        }
+        if (sx + boxW > Gdx.graphics.getWidth()) {
+            sx = mouseX - boxW - 18f;
+        }
+
+        // 半透明黑底 + 细边框
+        batch.setColor(0f, 0f, 0f, 0.92f);
+        batch.draw(white, sx, sy - boxH, boxW, boxH);
+        batch.setColor(0.55f, 0.55f, 0.60f, 0.9f);
+        // 边框用四条细矩形拼
+        batch.draw(white, sx, sy - boxH, boxW, 1f);
+        batch.draw(white, sx, sy - 1f, boxW, 1f);
+        batch.draw(white, sx, sy - boxH, 1f, boxH);
+        batch.draw(white, sx + boxW - 1f, sy - boxH, 1f, boxH);
+        batch.setColor(Color.WHITE);
+
+        // 白字正文，左上留 pad
+        font.setColor(Color.WHITE);
+        font.draw(batch, layout, sx + pad, sy - pad);
+        font.setColor(Color.WHITE);
     }
 }

@@ -35,6 +35,9 @@ public class BattleSystem {
     /** 本回合是否因晕眩/旧疾被跳过（0.2.6 数值框架）。玩家行动时若为 true，直接结束行动进入敌方回合 */
     private boolean skipThisTurn = false;
 
+    /** 本场战斗是否有敌人怯战逃跑（0.3.0 新手及时）。逃跑则胜利后金币 0、经验减半 */
+    private boolean fled = false;
+
     /**
      * 这场战斗里每个天赋触发了几次。
      * <p>
@@ -63,6 +66,10 @@ public class BattleSystem {
     public void start() {
         // 镜中人每场战斗最多免疫 2 次，开战时清零（上一场战斗的计数不能带过来）
         player.mirrorAvatarTriggerCount = 0;
+        // 亡者气质每场战斗第一次受超 15 伤减半，开战重置（0.3.0 墓渊）
+        player.deadAuraUsed = false;
+        // 召唤物不跨战斗保留：上一场战斗的僵尸/幽魂清空（0.3.0 墓渊）
+        player.minions.clear();
         log.add("——— 战斗开始：" + player.name + " VS " + enemyNames() + " ———");
         player.startTurn();
         log.add("");
@@ -261,6 +268,40 @@ public class BattleSystem {
                 player.slashCharges = 3;
                 log.add("  你摆出切割架势（接下来 3 次攻击附加 3 层流血）");
             }
+            case FLASH_THRUST -> {
+                Enemy target = firstAliveEnemy();
+                if (target != null) {
+                    int raw = rawFlashThrust(player) + skill.levelBonusDamage(level);
+                    attackEnemy(target, raw, Skill.Type.MELEE, false);
+                }
+            }
+            case SOUL_WREATH -> {
+                int amount = (int) (player.minions.size() * 3 + player.defense * 1.5);
+                player.setShield(amount, 1);
+                log.add("  护盾 +" + amount + "（召唤物 " + player.minions.size() + "x3 + 防御 "
+                        + player.defense + "x1.5），撑过本回合敌方行动后消失");
+            }
+            case SUMMON_ZOMBIE -> {
+                summonZombie();
+            }
+            case DEATH_WHIRL -> {
+                int raw = rawDeathWhirl(player) + skill.levelBonusDamage(level);
+                for (Enemy enemy : enemies) {
+                    if (enemy.isAlive()) {
+                        attackEnemy(enemy, raw, Skill.Type.AOE, false);
+                    }
+                }
+            }
+            case SUMMON_GHOST -> {
+                summonGhost();
+            }
+            case DEATH_SURGE -> {
+                Enemy target = lowestHpEnemy();
+                if (target != null) {
+                    int raw = rawDeathSurge(player) + skill.levelBonusDamage(level);
+                    attackEnemy(target, raw, Skill.Type.RANGED, false);
+                }
+            }
         }
 
         // 血之泪的「闪烁」按一次出手记一次：无论横扫打中几个目标，
@@ -270,6 +311,9 @@ public class BattleSystem {
                     "恢复 " + (player.hp - hpBeforeAction) + " 点生命值（HP " + hpBeforeAction
                             + " -> " + player.hp + "/" + player.maxHp + "）");
         }
+
+        // 召唤物行动（0.3.0 墓渊）：玩家出手后、判定胜负前，场上每个存活召唤物行动一次。
+        minionTurn();
 
         if (allEnemiesDead()) {
             state = State.VICTORY;
@@ -284,6 +328,10 @@ public class BattleSystem {
     private void enemyTurn() {
         log.add("--- 敌方回合 ---");
 
+        // 敌方回合开始：先结算每个敌人身上的中毒（0.3.1 补全）。
+        // 中毒在敌方回合开始扣血，层数 -1（毒一层层挥发）；扣死敌人也不影响它本回合行动前先被结算。
+        tickEnemyStatusAtTurnStart();
+
         for (Enemy enemy : enemies) {
             if (!enemy.isAlive()) {
                 continue;
@@ -295,6 +343,14 @@ public class BattleSystem {
         }
 
         if (state == State.DEFEAT) {
+            return;
+        }
+
+        // 0.3.2 修复：敌人在回合开始被毒死（或召唤物/流血结算致死）后，若场上已无活敌，
+        // 必须立即判胜利，否则 state 停在 PLAYER_TURN 却无敌人可打，玩家「无法继续行动」。
+        if (allEnemiesDead()) {
+            state = State.VICTORY;
+            log.add("* 战斗胜利！HP " + player.hp + "/" + player.maxHp + "，剩余精力 " + player.mp);
             return;
         }
 
@@ -313,6 +369,242 @@ public class BattleSystem {
         printStatus();
     }
 
+    // ==================== 召唤物（0.3.0 墓渊）====================
+
+    /** 召唤一个普通僵尸（血 = 精准×4，若带「死气」技巧则 +5） */
+    private void summonZombie() {
+        int hp = player.precision * 4;
+        if (player.hasCombatSkill(CombatSkill.Id.DEATH_QI)) {
+            hp += 5;
+        }
+        Minion zombie = new Minion(Minion.Kind.ZOMBIE, "普通僵尸", hp);
+        player.minions.add(zombie);
+        log.add("  你唤起了普通僵尸（HP " + hp + "）");
+    }
+
+    /** 召唤一个幽魂（血 = 精准×5，若带「死气」技巧则 +5） */
+    private void summonGhost() {
+        int hp = player.precision * 5;
+        if (player.hasCombatSkill(CombatSkill.Id.DEATH_QI)) {
+            hp += 5;
+        }
+        Minion ghost = new Minion(Minion.Kind.GHOST, "幽魂", hp);
+        player.minions.add(ghost);
+        log.add("  你唤起了幽魂（HP " + hp + "）");
+    }
+
+    /** 召唤物行动（0.3.0 墓渊）：玩家出手后、判定胜负前，场上每个存活召唤物行动一次。 */
+    private void minionTurn() {
+        if (player.minions.isEmpty()) {
+            return;
+        }
+        for (Minion minion : player.minions) {
+            if (minion.isAlive() && !allEnemiesDead()) {
+                minion.doTurn(enemies, this);
+            }
+        }
+        // 召唤物行动后可能击杀敌人，再次判定胜负留给调用方（useSkill 里的 allEnemiesDead）
+    }
+
+    /**
+     * 使用一个道具（0.3.0）。
+     * <p>
+     * 不消耗精力、不消耗行动次数，一回合内可连续使用多瓶，用完消失。
+     * 只能在玩家回合使用。返回是否成功（道具存在且已消耗）。
+     *
+     * @param itemIndex 道具在 {@code player.items} 里的下标
+     */
+    public boolean useItem(int itemIndex) {
+        if (state != State.PLAYER_TURN) {
+            log.add("! 现在不能使用道具");
+            return false;
+        }
+        if (itemIndex < 0 || itemIndex >= player.items.size()) {
+            return false;
+        }
+        Item item = player.items.remove(itemIndex);
+        applyItem(item);
+        log.add("> 你使用了【" + item.name + "】");
+
+        // 0.3.2 修复：道具理论上不会直接杀敌，但若因某种结算（如百变药水抽到毒药 + 敌人已残）
+        // 场上已无活敌，立即判胜，避免 state 停在 PLAYER_TURN 却无敌人可打、玩家「无法行动」。
+        if (allEnemiesDead()) {
+            state = State.VICTORY;
+            log.add("* 战斗胜利！HP " + player.hp + "/" + player.maxHp + "，剩余精力 " + player.mp);
+        }
+        return true;
+    }
+
+    /** 按道具 ID 执行效果（百变药水会在这里递归抽取） */
+    private void applyItem(Item item) {
+        switch (item.id) {
+            case REGEN_POTION -> {
+                StatusEffect.addStacks(player.statusEffects, StatusEffect.REGEN, 1, 3);
+                log.add("  每回合恢复 4 点生命，持续 3 回合");
+            }
+            case WEAKEN_POTION -> {
+                for (Enemy enemy : enemies) {
+                    if (enemy.isAlive()) {
+                        StatusEffect.addStacks(enemy.statusEffects, StatusEffect.WEAKEN, 1, 1);
+                    }
+                }
+                log.add("  所有敌人虚弱 1 回合");
+            }
+            case STRENGTH_POTION -> {
+                StatusEffect.addStacks(player.statusEffects, StatusEffect.STRENGTH_UP, 1, 3);
+                log.add("  每次攻击额外 +5 点伤害，持续 3 回合");
+            }
+            case POISON_POTION -> {
+                Enemy target = firstAliveEnemy();
+                if (target != null) {
+                    applyPoisonToEnemy(target, 5);
+                    log.add("  " + target.name + " 被挂上 5 层中毒");
+                }
+            }
+            case HEAL_POTION -> {
+                int before = player.hp;
+                player.heal(10);
+                log.add("  立即恢复 " + (player.hp - before) + " 点生命（HP " + player.hp
+                        + "/" + player.maxHp + "）");
+            }
+            case MYSTERY_POTION -> {
+                Item rolled = Item.MYSTERY_POOL[rng.nextInt(Item.MYSTERY_POOL.length)];
+                log.add("  百变药水变成了【" + rolled.name + "】");
+                applyItem(rolled);
+            }
+            case HOLY_WATER -> {
+                // 清除所有负面效果（不含诅咒）。增益（isBuff）保留。
+                player.statusEffects.removeIf(inst -> !inst.effect.isBuff);
+                log.add("  清除了所有负面效果");
+            }
+        }
+    }
+
+    /**
+     * 召唤物对单个敌人造成伤害（0.3.0 墓渊）。
+     * <p>
+     * 走一条简化的结算：固定伤害 → 久经/诸武精通召唤物加成 → 防御减伤 → 扣血。
+     * 不判暴击、不触发血之泪（血之泪是归尘专属，召唤物不共享）、不吃虚弱（召唤物不受玩家负面效果影响）。
+     *
+     * @param target      目标敌人
+     * @param raw         原始伤害
+     * @param isPlayerHit 是否算作「玩家造成」的伤害（用于再临/诸武精通等，这里恒 false，召唤物独立）
+     */
+    public void minionAttack(Enemy target, int raw, boolean isPlayerHit) {
+        double value = raw;
+        // 久经（召唤物伤害 x1.1）
+        if (player.hasCombatSkill(CombatSkill.Id.SEASONED)) {
+            value *= 1.1;
+        }
+        // 诸武精通（所有伤害含召唤物 x1.2）
+        if (player.hasTalent(Talent.Id.WEAPON_MASTERY)) {
+            value *= 1.2;
+        }
+        int damage = (int) value;
+        int finalDamage = applyDefense(damage, target.defense);
+        // 敌人自身免伤（0.3.1 骑士长祈祷）
+        if (target.damageTakenMult < 1.0) {
+            int reduced = (int) (finalDamage * target.damageTakenMult);
+            if (reduced < finalDamage) {
+                finalDamage = reduced;
+            }
+        }
+        // 先扣护盾，护盾不够的部分再扣血
+        int hpDamage = target.absorbByShield(finalDamage);
+        target.hp = Math.max(0, target.hp - hpDamage);
+
+        // 再临：墓渊每次攻击恢复召唤物 1 点血（这里「墓渊攻击」泛指召唤物攻击结算后回血）
+        if (player.hasCombatSkill(CombatSkill.Id.RECALL)) {
+            for (Minion m : player.minions) {
+                if (m.isAlive()) {
+                    m.hp = Math.min(m.maxHp, m.hp + 1);
+                }
+            }
+        }
+
+        // 亡语：召唤物「杀死」敌人时？不，亡语是召唤物死亡时触发，见 removeDeadMinions。
+    }
+
+    /** 血量最低的存活敌人（幽魂破点 / 死亡激荡目标） */
+    public Enemy lowestHpEnemy() {
+        Enemy result = null;
+        for (Enemy enemy : enemies) {
+            if (!enemy.isAlive()) {
+                continue;
+            }
+            if (result == null || enemy.hp < result.hp) {
+                result = enemy;
+            }
+        }
+        return result;
+    }
+
+    /**
+     * 给敌人施加中毒（0.3.1 统一入口）。
+     * <p>
+     * 所有「自身 / 召唤物给敌人上毒」都走这个方法，而不是直接 {@code StatusEffect.addStacks}，
+     * 这样「老毒物」（自身和召唤物造成的中毒额外 +1 层）才能统一生效，不会漏掉某条路径。
+     * <p>
+     * 中毒本身靠 {@link StatusEffect#addStacks} 的「层数相加」实现叠加：旧层数 + 新层数，
+     * 剩余回合刷新（取较大值）。敌人的中毒扣血在敌方回合开始时结算（见
+     * {@link #tickEnemyStatusAtTurnStart()}）。
+     *
+     * @param target 目标敌人
+     * @param stacks 基础中毒层数
+     */
+    public void applyPoisonToEnemy(Enemy target, int stacks) {
+        int total = stacks;
+        if (player.hasCombatSkill(CombatSkill.Id.OLD_POISONER)) {
+            total += 1;
+            log.add("[技巧] 老毒物：中毒层数额外 +1");
+        }
+        StatusEffect.addStacks(target.statusEffects, StatusEffect.POISON, total, 3);
+    }
+
+    /** 最靠前的存活召唤物（替死鬼转移伤害目标） */
+    private Minion firstAliveMinion() {
+        for (Minion m : player.minions) {
+            if (m.isAlive()) {
+                return m;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * 召唤物死亡结算（0.3.0 墓渊）：
+     * <ul>
+     *   <li>亡语：对全体敌人造成其最大生命 20% 伤害</li>
+     *   <li>死气勃勃：墓渊回 2 血（不超上限）</li>
+     * </ul>
+     * 由替死鬼转移致死、召唤物被 AOE 击杀时调用。
+     */
+    private void onMinionDeath(Minion minion) {
+        // 亡语：对全体敌人造成其最大生命 20% 伤害
+        if (player.hasTalent(Talent.Id.DEATH_WHISPER)) {
+            int dmg = Math.max(1, minion.maxHp / 5);
+            for (Enemy enemy : enemies) {
+                if (enemy.isAlive()) {
+                    int finalDamage = applyDefense(dmg, enemy.defense);
+                    enemy.hp = Math.max(0, enemy.hp - finalDamage);
+                    log.add("[天赋] 亡语：" + enemy.name + " 受到 " + finalDamage + " 点伤害（"
+                            + enemy.hp + "/" + enemy.maxHp + "）");
+                }
+            }
+        }
+        // 死气勃勃：场上任意单位死亡，墓渊回 2 血（不超上限）
+        if (player.hasTalent(Talent.Id.THRIVING_DEATH)) {
+            int before = player.hp;
+            player.heal(2);
+            int gained = player.hp - before;
+            if (gained > 0) {
+                log.add("[天赋] 死气勃勃：恢复 " + gained + " 点生命（HP " + player.hp
+                        + "/" + player.maxHp + "）");
+            }
+        }
+        player.minions.remove(minion);
+    }
+
     /**
      * 玩家回合开始时的负面效果结算（0.2.6 数值框架）。
      * <p>
@@ -321,6 +613,17 @@ public class BattleSystem {
      * 不需要各写一份扣血 / 跳过的逻辑。
      */
     private void tickStatusEffectsAtTurnStart() {
+        // 生命恢复（增益，0.3.0 生命恢复药水）：回合开始回 4 点血
+        if (StatusEffect.has(player.statusEffects, StatusEffect.Id.REGEN) && player.isAlive()) {
+            int before = player.hp;
+            player.heal(StatusEffect.REGEN.magnitude);   // magnitude = 4
+            int gained = player.hp - before;
+            if (gained > 0) {
+                log.add("[状态] 生命恢复：恢复 " + gained + " 点生命（HP "
+                        + player.hp + "/" + player.maxHp + "）");
+            }
+        }
+
         // 中毒：回合开始按「当前层数」扣血，随后层数 -1（毒一层层挥发）
         int poisonStacks = StatusEffect.stacksOf(player.statusEffects, StatusEffect.Id.POISON);
         if (poisonStacks > 0 && player.isAlive()) {
@@ -363,6 +666,28 @@ public class BattleSystem {
                 if (inst.duration <= 0) {
                     player.statusEffects.remove(i);
                 }
+            }
+        }
+    }
+
+    /**
+     * 敌方回合开始时，结算每个敌人身上的中毒（0.3.1 补全）。
+     * <p>
+     * 和玩家同语义：按「当前层数」扣血，随后层数 -1（毒一层层挥发）。
+     * 之前敌人被挂中毒后从不扣血（毒只是叠在状态栏里好看），召唤流打不出毒伤，
+     * 这里把它补上，让僵尸撕咬 / 剧毒药水 / 老毒物真正生效。
+     */
+    private void tickEnemyStatusAtTurnStart() {
+        for (Enemy enemy : enemies) {
+            if (!enemy.isAlive()) {
+                continue;
+            }
+            int poisonStacks = StatusEffect.stacksOf(enemy.statusEffects, StatusEffect.Id.POISON);
+            if (poisonStacks > 0) {
+                enemy.hp = Math.max(0, enemy.hp - poisonStacks);
+                StatusEffect.removeStacks(enemy.statusEffects, StatusEffect.Id.POISON, 1);
+                log.add("[状态] " + enemy.name + " 中毒：扣除 " + poisonStacks + " 点生命（"
+                        + enemy.hp + "/" + enemy.maxHp + "）");
             }
         }
     }
@@ -424,6 +749,21 @@ public class BattleSystem {
         return p.precision * 5;
     }
 
+    /** 瞬身突刺伤害 = 力量×1.5 + 精准×1.2（0.3.0 墓渊） */
+    public static int rawFlashThrust(Player p) {
+        return (int) (p.strength * 1.5 + p.precision * 1.2);
+    }
+
+    /** 死之旋风单体伤害 = 力量×2（0.3.0 墓渊） */
+    public static int rawDeathWhirl(Player p) {
+        return p.strength * 2;
+    }
+
+    /** 死亡激荡伤害 = 5 + 精准×1.5（0.3.0 墓渊） */
+    public static int rawDeathSurge(Player p) {
+        return (int) (5 + p.precision * 1.5);
+    }
+
     /**
      * 敌人对玩家造成伤害：先按防御减伤，再扣护盾（文档 2.6 待定项，这里定为「先减伤后扣盾」）。
      * <p>
@@ -442,6 +782,22 @@ public class BattleSystem {
         }
 
         int damage = applyDefense(rawDamage, player.defense);
+
+        // 长期训练（0.3.0 通用技巧）：免伤 +1%（乘法减伤，减伤之后）
+        if (player.hasCombatSkill(CombatSkill.Id.LONG_TRAINING)) {
+            int reduced = (int) (damage * 0.99);
+            if (reduced < damage) {
+                damage = reduced;
+            }
+        }
+
+        // 亡者气质（0.3.0 墓渊天赋）：每场战斗第一次受到超过 15 的伤害减半
+        if (player.hasTalent(Talent.Id.DEAD_AURA) && !player.deadAuraUsed && damage > 15) {
+            player.deadAuraUsed = true;
+            int halved = damage / 2;
+            log.add("[天赋] 亡者气质：第一次受到超过 15 的伤害减半（" + damage + " -> " + halved + "）");
+            damage = halved;
+        }
 
         // 陈年宝箱（宝箱怪）的毒雾 Buff：下次受击附带 3 层中毒（0.2.8）
         // 在减伤之后、护盾之前结算（无论护盾是否挡下，毒雾都沾上）
@@ -467,6 +823,29 @@ public class BattleSystem {
             if (boosted > damage) {
                 log.add("[状态] 易伤：受到伤害 " + damage + " -> " + boosted);
                 damage = boosted;
+            }
+        }
+
+        // 替死鬼（0.3.0 墓渊天赋）：伤害转移给场上召唤物；无召唤物时自身受击 +10%
+        if (player.hasTalent(Talent.Id.SCAPEGOAT)) {
+            Minion firstAlive = firstAliveMinion();
+            if (firstAlive != null) {
+                // 伤害转移给最前面的存活召唤物
+                int absorbed = Math.min(firstAlive.hp, damage);
+                firstAlive.hp -= damage;
+                log.add("[天赋] 替死鬼：" + firstAlive.name + " 替你承受了 " + damage + " 点伤害（"
+                        + Math.max(0, firstAlive.hp) + "/" + firstAlive.maxHp + "）");
+                if (firstAlive.hp <= 0) {
+                    log.add("[天赋] 亡语触发：" + firstAlive.name + " 倒下了");
+                    onMinionDeath(firstAlive);
+                }
+                return;   // 伤害完全被召唤物吸收
+            } else {
+                int boosted = (int) (damage * 1.1);
+                if (boosted > damage) {
+                    log.add("[天赋] 替死鬼：无召唤物可挡，受到伤害 " + damage + " -> " + boosted);
+                    damage = boosted;
+                }
             }
         }
 
@@ -546,6 +925,13 @@ public class BattleSystem {
             log.add("[天赋] 欢愉之礼：附加 " + joyBonus + " 点伤害");
         }
 
+        // 力量药水（0.3.0 增益）：每次攻击额外 +5 点伤害。放在乘区之前（固定值加法），
+        // 但不触发连击/血之泪（血之泪在末尾按伤害次数结算，与这个 +5 无关，它只影响 value）。
+        // 会吃后续的防御减伤（applyDefense），符合「吃免伤」的语义。
+        if (StatusEffect.has(player.statusEffects, StatusEffect.Id.STRENGTH_UP)) {
+            value += StatusEffect.STRENGTH_UP.magnitude;   // +5
+        }
+
         // ---- 3. 乘区组合（同类相加、不同类相乘）----
         double meleeMult = 1.0;     // 近战乘区
         double rangedMult = 1.0;    // 远程乘区
@@ -583,6 +969,27 @@ public class BattleSystem {
 
         // 乘区相乘：近战 x 远程 x AOE（一次攻击只属于其中一类，其余为 1.0）
         value = value * meleeMult * rangedMult * aoeMult;
+
+        // 诸武精通（0.3.0 宝箱限定天赋）：所有伤害（含召唤物，召唤物在 minionAttack 里另算）x1.2
+        if (player.hasTalent(Talent.Id.WEAPON_MASTERY)) {
+            value *= 1.2;
+        }
+
+        // 替死鬼（0.3.0 墓渊天赋）：无召唤物时，墓渊造成的伤害 x1.1
+        if (player.hasTalent(Talent.Id.SCAPEGOAT) && firstAliveMinion() == null) {
+            value *= 1.1;
+        }
+
+        // 贪婪者（0.3.0 诅咒）：金币 < 50 伤害 -20%，金币 < 100 伤害 -10%
+        if (Curse.has(player.curses, Curse.Id.GREEDY)) {
+            if (player.gold < 50) {
+                value *= 0.8;
+                log.add("[诅咒] 贪婪者：金币不足 50，本次伤害 -20%");
+            } else if (player.gold < 100) {
+                value *= 0.9;
+                log.add("[诅咒] 贪婪者：金币不足 100，本次伤害 -10%");
+            }
+        }
 
         // ---- 4. 特殊触发判定 ----
         // 完美仿制（空梦）：x0.7，由调用方在出手时统一传入，三段共享同一个开关
@@ -638,24 +1045,47 @@ public class BattleSystem {
         int damage = (int) value;
 
         // ---- 5. 暴击判定 ----
-        double crit = player.critRate;
-        // 随性：随心一箭暴击率 +10%
-        if (isBasicAttack && player.hasCombatSkill(CombatSkill.Id.FREE_CRIT)) {
-            crit += 0.10;
-        }
-        // 天佑（0.2.8 降临者天赋）：暴击率 +10%
-        if (player.hasTalent(Talent.Id.HEAVENLY_BLESSING)) {
-            crit += 0.10;
+        double crit;
+        if (player.critLocked) {
+            // 出金了（0.3.0 宝箱奖励）：暴击率固定在 30%，后续无法提升
+            crit = 0.30;
+        } else {
+            crit = player.critRate;
+            // 随性：随心一箭暴击率 +10%
+            if (isBasicAttack && player.hasCombatSkill(CombatSkill.Id.FREE_CRIT)) {
+                crit += 0.10;
+            }
+            // 天佑（0.2.8 降临者天赋）：暴击率 +10%
+            if (player.hasTalent(Talent.Id.HEAVENLY_BLESSING)) {
+                crit += 0.10;
+            }
+            // 聚精会神（0.3.0 通用技巧）：暴击率 +2%
+            if (player.hasCombatSkill(CombatSkill.Id.FOCUS)) {
+                crit += 0.02;
+            }
         }
         if (rng.nextDouble() < crit) {
             damage = (int) (value * player.critDamage);
             log.add("** 暴击！" + (int) value + " -> " + damage + "（x" + player.critDamage + "）");
         }
 
-        // ---- 6. 防御减伤 ----
+        // ---- 6. 防御减伤 + 敌人护盾（0.3.1 骑士系）----
         int finalDamage = applyDefense(damage, target.defense);
-        target.hp = Math.max(0, target.hp - finalDamage);
-        log.add("  " + target.name + " 受到 " + finalDamage + " 点（原始 " + damage
+        // 敌人自身免伤（0.3.1 骑士长祈祷）：在防御减伤之后额外乘一次 damageTakenMult
+        if (target.damageTakenMult < 1.0) {
+            int reduced = (int) (finalDamage * target.damageTakenMult);
+            if (reduced < finalDamage) {
+                finalDamage = reduced;
+            }
+        }
+        // 先扣护盾，护盾不够的部分再扣血
+        int hpDamage = target.absorbByShield(finalDamage);
+        int blocked = finalDamage - hpDamage;
+        target.hp = Math.max(0, target.hp - hpDamage);
+        if (blocked > 0) {
+            log.add("  " + target.name + " 的护盾吸收了 " + blocked + " 点（护盾剩余 " + target.shield + "）");
+        }
+        log.add("  " + target.name + " 受到 " + hpDamage + " 点（原始 " + damage
                 + "，防御 " + target.defense + "）-> " + target.hp + "/" + target.maxHp);
 
         // ---- 7. 敌人流血结算（0.2.8 补全）----
@@ -685,6 +1115,13 @@ public class BattleSystem {
             log.add("[技能] 切割：" + target.name + " 被挂上 3 层流血（剩余 " + player.slashCharges + " 次）");
         }
 
+        // 粗鄙之人（0.3.0 通用技巧）：攻击有 2% 概率晕眩目标敌人（放在扣血之后、血之泪之前）
+        if (player.hasCombatSkill(CombatSkill.Id.CRUDE) && target.isAlive()
+                && rng.nextDouble() < 0.02) {
+            StatusEffect.addStacks(target.statusEffects, StatusEffect.STUN, 1, 1);
+            log.add("[技巧] 粗鄙之人：" + target.name + " 被晕眩了");
+        }
+
         // 血之泪：每段伤害回 1 血（按伤害次数算）
         if (player.hasTalent(Talent.Id.BLOOD_TEAR)) {
             player.heal(BLOOD_TEAR_HEAL);
@@ -694,6 +1131,17 @@ public class BattleSystem {
         if (type == Skill.Type.RANGED && player.hasCombatSkill(CombatSkill.Id.RANGED_LIFESTEAL)) {
             player.heal(1);
             log.add("[技巧] 血之回响：远程技能恢复 1 点生命");
+        }
+
+        // 死气勃勃（0.3.0 墓渊天赋）：敌人被击杀时，墓渊回 2 血（不超上限）
+        if (!target.isAlive() && player.hasTalent(Talent.Id.THRIVING_DEATH)) {
+            int before = player.hp;
+            player.heal(2);
+            int gained = player.hp - before;
+            if (gained > 0) {
+                log.add("[天赋] 死气勃勃：敌人倒下，恢复 " + gained + " 点生命（HP "
+                        + player.hp + "/" + player.maxHp + "）");
+            }
         }
     }
 
@@ -756,6 +1204,21 @@ public class BattleSystem {
 
     public int getRound() {
         return round;
+    }
+
+    /** 随机源（0.3.0 起公开，供敌人技能做概率判定，如侦查骑士 20% 晕眩） */
+    public Random random() {
+        return rng;
+    }
+
+    /** 标记本场有敌人逃跑（0.3.0 新手及时怯战） */
+    public void markFled() {
+        fled = true;
+    }
+
+    /** 本场是否有敌人逃跑（RunState.onBattleWin 据此决定金币 0、经验减半） */
+    public boolean hasFled() {
+        return fled;
     }
 
     public boolean allEnemiesDead() {

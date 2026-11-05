@@ -320,22 +320,25 @@ public class CharacterSelectScreen implements Screen {
             if (chars.length >= 3) {
                 select(chars[2]);
             }
+        } else if (Gdx.input.isKeyJustPressed(Input.Keys.NUM_4)) {
+            if (chars.length >= 4) {
+                select(chars[3]);
+            }
         } else if (Gdx.input.isKeyJustPressed(Input.Keys.ESCAPE)) {
             game.setScreen(new StartScreen(game));
             dispose();
         }
     }
 
-    /** 锁定角色：降临者走捏脸流程，其余角色初始化一局进地图 */
+    /** 锁定角色：降临者走捏脸流程，其余角色进入章节选择（0.3.1） */
     private void select(CharacterData c) {
         if (c.type == CharacterType.DESCENDER) {
             game.setScreen(new CustomCharacterScreen(game));
             dispose();
             return;
         }
-        RunState run = new RunState(c.type);
-        Gdx.app.log("CharacterSelect", "选择角色：" + c.type + "，seed = " + run.seed);
-        game.setScreen(new MapScreen(game, run));
+        // 0.3.1 多章节：选完角色先选章节，再进地图
+        game.setScreen(new ChapterSelectScreen(game, c.type));
         dispose();
     }
 

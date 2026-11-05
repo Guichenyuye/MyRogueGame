@@ -277,10 +277,10 @@ public class CustomCharacterScreen implements Screen {
             game.setAvatar(CharacterType.DESCENDER, customAvatar);
             customAvatar = null;
         }
-        RunState run = new RunState(System.nanoTime(), p);
         Gdx.app.log("CustomCharacter", "降临者：" + name + "，力 " + allocated[0]
                 + " / 准 " + allocated[1] + " / 防 " + allocated[2]);
-        game.setScreen(new MapScreen(game, run));
+        // 0.3.1 多章节：捏脸完先进章节选择，再进地图
+        game.setScreen(new ChapterSelectScreen(game, CharacterType.DESCENDER, p));
         dispose();
     }
 
